@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app'
 import { getToken, initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from 'firebase/app-check'
-import { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode } from 'firebase/ai'
+import { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode, InferenceSource } from 'firebase/ai'
 
 // Only explicit diagnostic button presses initiate AI inference.
 // Never send case evidence, files, or user text in a diagnostic request.
@@ -67,7 +67,7 @@ export async function runDeviceProbe(onProgress: (fraction: number) => void): Pr
   const model = getGenerativeModel(ai, { mode: InferenceMode.ONLY_ON_DEVICE })
   await model.initializeDeviceModel(onProgress)
   const result = await model.generateContent(PROBE_PROMPT)
-  if (result.response.inferenceSource !== 'ON_DEVICE') {
+  if (result.response.inferenceSource !== InferenceSource.ON_DEVICE) {
     throw new Error('The SDK did not confirm an on-device inference source.')
   }
   const text = result.response.text().trim()
@@ -89,7 +89,7 @@ export async function runCloudProbe(): Promise<InferenceProbe> {
     },
   })
   const result = await model.generateContent(PROBE_PROMPT)
-  if (result.response.inferenceSource !== 'IN_CLOUD') {
+  if (result.response.inferenceSource !== InferenceSource.IN_CLOUD) {
     throw new Error('The SDK did not confirm a cloud inference source.')
   }
   const text = result.response.text().trim()

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { evidence, findings, nodes, edges, reportText, type Finding } from './demo'
 import { firebaseConfigured, verifyAppCheck } from './firebase'
 
@@ -12,7 +12,7 @@ const sections: { key: Section; name: string }[] = [
 ]
 
 function statusClass(status: Finding['status']) {
-  return status === 'Possible concern' ? 'caution' : status === 'Corroborated fact' ? 'verified' : 'unknown'
+  return status === 'Possible concern' ? 'caution' : status === 'Corroborated conflict' ? 'verified' : 'unknown'
 }
 
 export default function App() {
@@ -23,14 +23,44 @@ export default function App() {
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [appCheckResult, setAppCheckResult] = useState('')
   const [checkingAppCheck, setCheckingAppCheck] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const currentFinding = findings.find((finding) => finding.id === selectedFinding) || findings[0]
   const currentEvidence = evidence.find((item) => item.id === selectedEvidence) || evidence[0]
 
-  function selectFinding(id: string) {
+  // Escape and Tab behavior is required for the already-existing source dialog.
+  useEffect(() => {
+    if (!sourceOpen) return
+    const oldFocus = document.activeElement
+    const dialog = dialogRef.current
+    const buttons = dialog ? Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')) : []
+    buttons[0]?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSourceOpen(false)
+      } else if (event.key === 'Tab' && buttons.length) {
+        const first = buttons[0], last = buttons[buttons.length - 1]
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (oldFocus instanceof HTMLElement && oldFocus.isConnected) oldFocus.focus()
+    }
+  }, [sourceOpen])
+
+  function selectFinding(id: string, preferredEvidenceId?: string) {
     const finding = findings.find((item) => item.id === id)
     if (!finding) return
     setSelectedFinding(id)
-    setSelectedEvidence(finding.evidenceIds[0])
+    setSelectedEvidence(preferredEvidenceId && finding.evidenceIds.includes(preferredEvidenceId) ? preferredEvidenceId : finding.evidenceIds[0])
     setSourceOpen(false)
   }
 
@@ -119,7 +149,7 @@ export default function App() {
                   <svg className="connections" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                     {edges.map(([from, to], index) => <line key={index} x1={nodes[from].x} y1={nodes[from].y} x2={nodes[to].x} y2={nodes[to].y}/>)}
                   </svg>
-                  {nodes.map((node) => <button key={node.id} type="button" className={'graph-node ' + node.tone + (currentFinding.id === node.finding ? ' node-focus' : '')} style={{ left: node.x + '%', top: node.y + '%' }} onClick={() => selectFinding(node.finding)} aria-label={node.label + ': inspect related evidence'}>{node.label}</button>)}
+                  {nodes.map((node) => <button key={node.id} type="button" className={'graph-node ' + node.tone + (currentFinding.id === node.finding ? ' node-focus' : '')} style={{ left: `clamp(62px, ${node.x}%, calc(100% - 62px))`, top: node.y + '%' }} onClick={() => selectFinding(node.finding, node.id === 'email' ? 'email' : node.id === 'offer' ? 'offer' : undefined)} aria-label={node.label + ': inspect related evidence'}>{node.label}</button>)}
                 </div>
                 <div className="graph-legend"><span><i className="legend-circle sources" /> Source</span><span><i className="legend-circle claims" /> Claim</span><span><i className="legend-circle risks" /> Concern</span></div>
               </div>
@@ -142,15 +172,15 @@ export default function App() {
           <h4>EVIDENCE</h4>
           <div className="source-links">{currentFinding.evidenceIds.map((id) => {const item = evidence.find((source) => source.id === id);return item ? <button key={item.id} className="source-link" onClick={() => openEvidence(item.id)}>{item.name} · {item.anchor} <span aria-hidden="true">↗</span></button> : null})}</div>
           <h4>NEXT CHECK</h4><p>{currentFinding.nextStep}</p>
-          <button className="primary-action inspector-action" onClick={() => openEvidence(currentFinding.evidenceIds[0])}>Open source snippet <span aria-hidden="true">↗</span></button>
+          <button className="primary-action inspector-action" onClick={() => openEvidence(currentFinding.evidenceIds.includes(selectedEvidence) ? selectedEvidence : currentFinding.evidenceIds[0])}>Open source snippet <span aria-hidden="true">↗</span></button>
           <button className="privacy-action" onClick={() => setPrivacyOpen((value) => !value)} aria-expanded={privacyOpen}>Privacy and cloud controls {privacyOpen ? '−' : '+'}</button>
           {privacyOpen && <div className="privacy-panel"><strong>Local-only demonstration</strong><p>Original real-world evidence is not accepted here. Firebase AI Logic and cloud submission have not been connected; no background fallback or cloud call is running.</p><p>Future cloud flow: local extraction → redact → preview exact payload → explicit approval → request with verified inference source.</p></div>}
         </aside>
       </div>
 
       {sourceOpen && <div className="modal-backdrop" onClick={() => setSourceOpen(false)}>
-        <div role="dialog" aria-modal="true" aria-labelledby="source-title" className="source-dialog" onClick={(event) => event.stopPropagation()}>
-          <div className="dialog-top"><div><p className="eyebrow">LOCAL SAMPLE · VERIFIED REFERENCE</p><h2 id="source-title">{currentEvidence.name}</h2></div><button className="close-dialog" aria-label="Close source snippet" onClick={() => setSourceOpen(false)}>×</button></div>
+        <div role="dialog" aria-modal="true" aria-labelledby="source-title" className="source-dialog" ref={dialogRef} onClick={(event) => event.stopPropagation()}>
+          <div className="dialog-top"><div><p className="eyebrow">FICTIONAL SAMPLE · SOURCE EXCERPT</p><h2 id="source-title">{currentEvidence.name}</h2></div><button className="close-dialog" aria-label="Close source snippet" onClick={() => setSourceOpen(false)}>×</button></div>
           <span className="source-anchor">{currentEvidence.anchor}</span><blockquote>{currentEvidence.excerpt}</blockquote><p className="small-muted">{currentEvidence.note}</p><p className="small-muted">Evidence is fictional. The app did not read or upload an original attachment.</p>
           <button className="primary-action" onClick={() => setSourceOpen(false)}>Back to investigation</button>
         </div>

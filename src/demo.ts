@@ -7,7 +7,7 @@ export type EvidenceItem = {
   note: string
 }
 
-export type FindingStatus = 'Possible concern' | 'Insufficient evidence' | 'Corroborated fact'
+export type FindingStatus = 'Possible concern' | 'Insufficient evidence' | 'Corroborated conflict' | 'Unverified hypothesis'
 export type Finding = {
   id: string
   title: string
@@ -56,7 +56,7 @@ export const findings: Finding[] = [
   {
     id: 'domain',
     title: 'Company domain differs',
-    status: 'Possible concern',
+    status: 'Corroborated conflict',
     description: 'The offer names northstar.example, while the recruiter message directs the applicant to northstarr.example. The difference needs independent verification.',
     evidenceIds: ['offer', 'email'],
     nextStep: 'Obtain the genuine company website independently and verify the recruiter identity.',
@@ -64,7 +64,7 @@ export const findings: Finding[] = [
   {
     id: 'payment',
     title: 'Payment request repeated',
-    status: 'Corroborated fact',
+    status: 'Possible concern',
     description: 'Both the recruiter message and the invoice mention a ₹2,499 charge. Their agreement does not establish legitimacy.',
     evidenceIds: ['email', 'invoice'],
     nextStep: 'Request written justification through a verified organization contact.',

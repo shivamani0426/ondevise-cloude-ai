@@ -1,0 +1,33 @@
+name: PhantomGraph dependency audit
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Classify dependency advisories
+        run: |
+          npm audit --json > /tmp/phantomgraph-audit.json || true
+          node -e '
+          const fs=require("fs");
+          const report=JSON.parse(fs.readFileSync("/tmp/phantomgraph-audit.json","utf8"));
+          console.log("AUDIT COUNTS",JSON.stringify(report.metadata?.vulnerabilities||{}));
+          for(const [name,v] of Object.entries(report.vulnerabilities||{})){
+            console.log("AUDIT ISSUE",JSON.stringify({
+              name,severity:v.severity,isDirect:v.isDirect,range:v.range,
+              via:v.via?.map(x=>typeof x==="string"?x:{name:x.name,title:x.title,url:x.url,range:x.range}),
+              fixAvailable:v.fixAvailable
+            }));
+          }'
+      - name: Production dependency audit gate
+        run: npm audit --omit=dev --audit-level=high

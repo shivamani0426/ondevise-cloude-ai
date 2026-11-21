@@ -1,0 +1,18 @@
+name: PhantomGraph functional browser smoke
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium firefox
+      - run: npm run build
+      - run: npm run test:unit
+      - run: npm run test:browser

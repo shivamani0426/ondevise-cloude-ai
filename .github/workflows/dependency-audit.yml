@@ -1,7 +1,7 @@
 name: PhantomGraph dependency audit
 on:
   push:
-    branches: ["qa/foundation-stabilization-20261122"]
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Classify dependency advisories
         run: |
           npm audit --json > /tmp/phantomgraph-audit.json || true

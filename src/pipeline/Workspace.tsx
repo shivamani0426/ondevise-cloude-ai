@@ -163,6 +163,12 @@ export default function InvestigationWorkspace() {
       const grounded = validateAIReview(result.text, documents, 'on-device')
       const proposedPrivate = validatePrivacyCandidates(result.text, documents)
       setLocalSensitive(proposedPrivate)
+      // Any earlier cloud preview was built without these newly approved local
+      // privacy suggestions. Invalidate its contents and prior consent.
+      setCloudPayload('')
+      setPayloadApproved(false)
+      setSparkConfirmed(false)
+      setCloudStatus('Local review finished. Prepare a new redacted cloud preview if you want an optional cloud analysis.')
       setInvestigation(previous => previous ? { ...previous, findings: [
         ...previous.findings.filter(finding => finding.origin !== 'on-device'), ...grounded,
       ] } : previous)

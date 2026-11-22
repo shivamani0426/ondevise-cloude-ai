@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { firebaseConfigured, supportsChromeOnDevice } from '../firebase'
-import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalPrompt, reportInvestigation, validateAIReview, validatePrivacyCandidates, validateApprovedCloudPayload, inspectLocalReview } from './core'
+import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalEvidencePlan, reportInvestigation, validateAIReview, validateLocalEvidenceSelection, inspectLocalEvidenceSelection, validatePrivacyCandidates, validateApprovedCloudPayload } from './core'
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
 import { analyzeWithLocalModel, analyzeWithCloudModel } from './ai'
@@ -158,11 +158,15 @@ export default function InvestigationWorkspace() {
     setLocalRaw('')
     const startedAt = performance.now()
     try {
-      const prompt = makeLocalPrompt(documents)
-      const result = await analyzeWithLocalModel(prompt, setModelDownload)
+      const plan = makeLocalEvidencePlan(documents, investigation.findings)
+      if (!plan.choices.length) {
+        setLocalStatus('No readable source quotations fit the compact local prompt. Rule-based findings remain available.')
+        return
+      }
+      const result = await analyzeWithLocalModel(plan.prompt, setModelDownload)
       setLocalRaw(result.text)
-      const diagnostics = inspectLocalReview(result.text, documents)
-      const grounded = validateAIReview(result.text, documents, 'on-device')
+      const diagnostics = inspectLocalEvidenceSelection(result.text, documents, plan.choices)
+      const grounded = validateLocalEvidenceSelection(result.text, documents, plan.choices)
       const proposedPrivate = validatePrivacyCandidates(result.text, documents)
       setLocalSensitive(proposedPrivate)
       // Any earlier cloud preview was built without these newly approved local
@@ -386,11 +390,11 @@ export default function InvestigationWorkspace() {
 
       {investigation && <section className="case-panel" aria-labelledby="ai-review-title">
         <div className="case-panel-top"><h2 id="ai-review-title">4. Optional hybrid AI review</h2><span className="case-tag">Explicit actions only</span></div>
-        <p>Both inference routes passed earlier fictional connectivity probes. This case review now accepts only AI-selected quotations that match actual source text. It does not certify interpretations or authenticity.</p>
+        <p>On-device evidence selection remains local and source-verifiable. Gemini cloud access is currently restricted for this project; do not assume the optional cloud route works. Source authenticity and interpretation still require human review.</p>
 
         <div className="case-model-section">
           <h3>A. On-device Firebase AI Logic</h3>
-          <p>Uses Chrome's local model. To reduce CPU/GPU load, this optional review examines up to six high-relevance excerpts (maximum 2,400 prompt characters), not the whole case. The full rule-based graph still uses all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no fallback. AI selections lacking an exact source quotation are rejected.</p>
+          <p>Uses Chrome's local model. To reduce CPU/GPU load, it receives up to six numbered, source-grounded quotation choices (maximum 2,400 prompt characters). The model returns choice IDs, not newly written quotations. PhantomGraph independently checks each ID and the original source text. The full rule-based investigation still examines all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no cloud fallback.</p>
           <button className="outline-action" type="button" disabled={Boolean(busy) || !firebaseConfigured || !supportsChromeOnDevice() || localAttempted} onClick={localReview}>
             {busy === 'local' ? 'Local model analyzing…' : localAttempted ? 'Local review attempted' : 'Review case with on-device AI'}
           </button>
@@ -405,7 +409,7 @@ export default function InvestigationWorkspace() {
 
         <div className="case-model-section">
           <h3>B. Optional Gemini cloud review</h3>
-          <p>Cloud analysis is <strong>off by default</strong>. Prepare a redacted preview and edit it. Automatic redaction cannot detect all private names or context; never approve a payload you have not read. Only the text in the editor will be sent, once, after explicit consent.</p>
+          <p>Cloud analysis is <strong>off by default</strong> and free-tier access is currently restricted for this project (403). You can inspect the local redacted preview without sending it. Automatic redaction can miss names or private context; never approve a payload you have not read. If cloud access is legitimately restored, only the explicitly approved text is sent once.</p>
           <button className="outline-action" disabled={Boolean(busy) || cloudAttempted} type="button" onClick={prepareCloud}>
             Prepare locally redacted cloud preview
           </button>

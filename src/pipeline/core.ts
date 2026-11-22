@@ -323,16 +323,51 @@ export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): 
     privacyAccepted: result.privacyAccepted, summary }
 }
 
-// AI privacy suggestions are accepted only if they match literal local evidence.
-// This validation never authorizes cloud use and never treats model output as proof.
+// Literal quotation matching is necessary for AI privacy suggestions but not
+// sufficient: an inventory quantity such as "96 units" is evidence, not PII.
+// Never let free-text model output erase investigative facts. Only recognized
+// identifiers, organization labels, or context-labeled personal names qualify
+// for automatic optional masking. Other private context still needs manual
+// inspection/editing of the cloud draft before consent.
+function sensitivePrivacyCandidate(value: string, sourceText: string): boolean {
+  if (value.trim() !== value || value.length < 4 || value.length > 120 || !sourceText.includes(value)) return false
+  // Guard common evidence facts: shipment quantities, prices and standalone
+  // dates must not become "privacy redactions" just because AI selected them.
+  if (/^\d[\d,]*(?:\.\d+)?\s*(?:units?|items?|pieces?|pcs|packages?|boxes|cartons|days?|weeks?|months?|years?|kg|km)\b/i.test(value) ||
+      /^(?:(?:₹|€|\$|£)\s*|(?:USD|INR|EUR|GBP|Rs\.?)\s*)\d/i.test(value) ||
+      /^(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})$/.test(value)) return false
+
+  // Only accept complete known identifier patterns, not arbitrary phrases
+  // containing one identifier and extra instructions or factual claims.
+  if (sensitivePatterns.some(pattern => {
+    const exact = new RegExp('^(?:' + pattern.re.source + ')$', pattern.re.flags.replace(/[gy]/g, ''))
+    return exact.test(value)
+  })) return true
+
+  // Company names may be confidential, but generic shipping destinations,
+  // quantities and technical field names are not automatic privacy candidates.
+  if (/^(?:[A-Z][\p{L}'-]*\s+){1,4}(?:Labs|Technologies|Solutions|Services|Consulting|Enterprises|Corporation|Limited|LLP|Studio|Inc\.?|LLC)$/u.test(value)) return true
+
+  // For bare personal names, require an explicit field label in the SAME
+  // source excerpt. Capitalization alone is not evidence of private identity.
+  if (/^[A-Z][\p{L}'-]*(?:[\s-][A-Z][\p{L}'-]*){1,3}$/u.test(value)) {
+    const escaped = value.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&')
+    return new RegExp('\\b(?:name|contact|client|customer|employee|patient|recipient|supplier|signed\\s+by)\\s*(?::|=|-)\\s*' + escaped + '(?![\\p{L}])', 'iu').test(sourceText)
+  }
+  return false
+}
+
+// Do not auto-mask a model-selected phrase unless it is both literally present
+// in a source excerpt and independently recognizable as private context.
 export function validatePrivacyCandidates(raw: string, documents: EvidenceDocument[]): string[] {
   const parsed = parseAIReview(raw)
   if (parsed === null) return []
   if (!parsed || typeof parsed !== 'object' || !('privacyCandidates' in parsed)) return []
   const list = (parsed as { privacyCandidates?: unknown }).privacyCandidates
   if (!Array.isArray(list)) return []
-  const corpus = documents.flatMap(doc => doc.segments.map(segment => segment.text)).join('\n')
-  return unique(list.filter((x): x is string => typeof x === 'string' && x.length >= 4 && x.length <= 120 && corpus.includes(x))).slice(0, 16)
+  const segments = documents.flatMap(doc => doc.segments.map(segment => segment.text))
+  return unique(list.filter((x): x is string => typeof x === 'string' &&
+    segments.some(segment => sensitivePrivacyCandidate(x, segment)))).slice(0, 16)
 }
 
 export function redactWithSuggestions(text: string, suggestions: string[] = []): { text: string; count: number; categories: string[] } {
@@ -340,7 +375,9 @@ export function redactWithSuggestions(text: string, suggestions: string[] = []):
   let result = rule.text
   let count = rule.count
   for (const suggestion of suggestions) {
-    if (suggestion.length < 4 || !result.includes(suggestion)) continue
+    // Defense in depth for callers of this exported helper. Model-suggested
+    // quantities/dates/prices cannot be masked even if supplied directly.
+    if (!sensitivePrivacyCandidate(suggestion, text) || !result.includes(suggestion)) continue
     const matches = result.split(suggestion)
     count += matches.length - 1
     result = matches.join('[LOCAL_AI_REDACTED]')

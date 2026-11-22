@@ -370,14 +370,14 @@ export function validatePrivacyCandidates(raw: string, documents: EvidenceDocume
     segments.some(segment => sensitivePrivacyCandidate(x, segment)))).slice(0, 16)
 }
 
-export function redactWithSuggestions(text: string, suggestions: string[] = []): { text: string; count: number; categories: string[] } {
+export function redactWithSuggestions(text: string, suggestions: string[] = [], sourceContext: string = text): { text: string; count: number; categories: string[] } {
   const rule = redactForCloud(text)
   let result = rule.text
   let count = rule.count
   for (const suggestion of suggestions) {
     // Defense in depth for callers of this exported helper. Model-suggested
     // quantities/dates/prices cannot be masked even if supplied directly.
-    if (!sensitivePrivacyCandidate(suggestion, text) || !result.includes(suggestion)) continue
+    if (!sensitivePrivacyCandidate(suggestion, sourceContext) || !result.includes(suggestion)) continue
     const matches = result.split(suggestion)
     count += matches.length - 1
     result = matches.join('[LOCAL_AI_REDACTED]')
@@ -435,10 +435,13 @@ export function makeCloudPayload(documents: EvidenceDocument[], suggestions: str
   }
   let redactions = 0
   const categories: string[] = []
+  // One recognized identifier may occur without its label in later excerpts.
+  // Validate against all local source text, then redact every literal occurrence.
+  const privacyContext = documents.flatMap(doc => doc.segments.map(segment => segment.text)).join('\n')
   for (const doc of documents.slice(0, 8)) {
     for (const segment of doc.segments.slice(0, 35)) {
       if (/^\[No (?:extractable|readable)/i.test(segment.text)) continue
-      const cleaned = redactWithSuggestions(segment.text.slice(0, 1100), suggestions)
+      const cleaned = redactWithSuggestions(segment.text.slice(0, 1100), suggestions, privacyContext)
       const entry = { id: sourceRef(doc, segment), sourceId: doc.id, kind: doc.format,
         anchor: segment.anchor, excerpt: cleaned.text }
       request.redactedEvidence.push(entry)
@@ -636,7 +639,8 @@ export function buildGraph(investigation: Investigation): CaseGraph {
 export function reportInvestigation(investigation: Investigation, suggestions: string[] = []): string {
   // Safe by default: redact identifiers in excerpts and omit original filenames.
   // The report is generated and downloaded locally; nothing is uploaded for export.
-  const safe = (text: string) => redactWithSuggestions(text, suggestions).text
+  const privacyContext = investigation.documents.flatMap(doc => doc.segments.map(segment => segment.text)).join('\n')
+  const safe = (text: string) => redactWithSuggestions(text, suggestions, privacyContext).text
   const lines = ['PHANTOMGRAPH AI — REDACTED LOCAL INVESTIGATION REPORT', 'Generated: ' + new Date().toISOString(), '',
     'LIMITATIONS: Automated extraction and heuristics can miss evidence. AI findings are unverified hypotheses, not professional advice or fraud determinations.',
     'Sensitive patterns are masked, but automatic redaction is incomplete. Read before sharing this report.',

@@ -2,24 +2,11 @@ import { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode, InferenceSou
 import { CLOUD_MODEL, ensureAppCheckToken, getFirebaseApp, supportsChromeOnDevice } from '../firebase'
 
 // Firebase's on-device Prompt API can constrain generated JSON directly. A prompt
-// alone does not guarantee JSON. The nested quote contract constrains format,
-// not truth: independent literal quote validation is required before rendering.
+// alone does not guarantee JSON. The ID-only contract constrains format,
+// not relevance: the application alone resolves IDs to existing verbatim quotes.
 const localReviewSchema = Schema.object({
   properties: {
-    findings: Schema.array({
-      items: Schema.object({
-        properties: {
-          evidence: Schema.array({
-            items: Schema.object({
-              properties: {
-                ref: Schema.string(),
-                quote: Schema.string(),
-              },
-            }),
-          }),
-        },
-      }),
-    }),
+    selectedIds: Schema.array({ items: Schema.string() }),
     privacyCandidates: Schema.array({ items: Schema.string() }),
   },
 })

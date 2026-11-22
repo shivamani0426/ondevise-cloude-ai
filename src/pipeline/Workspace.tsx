@@ -321,7 +321,7 @@ export default function InvestigationWorkspace() {
 
       {investigation && <section className="case-panel" aria-labelledby="findings-title">
         <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} entities · {investigation.findings.length} findings</span></div>
-        <p>Rule-based findings include cautious comparisons of quantities, dates, fees and terms across sources. Different shipment stages or unsigned revisions are NOT proof of loss, fraud or legal effect. AI can only select literal quotations from extracted sources; all findings still require human review.</p>
+        <p>Rule-based findings compare evidence across document categories, including explicit shared record references and differences in the same labelled field. Matching reference strings do NOT establish the same real-world event, authenticity or fraud. Different process stages or unsigned revisions require manual review. AI can only select literal quotations from extracted sources.</p>
 
         {graph && <div className="case-graph-map" aria-label="Interactive evidence graph">
           <svg className="case-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">

@@ -318,8 +318,7 @@ export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): 
 // AI privacy suggestions are accepted only if they match literal local evidence.
 // This validation never authorizes cloud use and never treats model output as proof.
 export function validatePrivacyCandidates(raw: string, documents: EvidenceDocument[]): string[] {
-  let parsed: unknown
-  parsed = parseAIReview(raw)
+  const parsed = parseAIReview(raw)
   if (parsed === null) return []
   if (!parsed || typeof parsed !== 'object' || !('privacyCandidates' in parsed)) return []
   const list = (parsed as { privacyCandidates?: unknown }).privacyCandidates

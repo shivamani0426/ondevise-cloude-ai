@@ -157,7 +157,7 @@ export default function InvestigationWorkspace() {
     setLocalStatus('Preparing local Firebase AI Logic model. Cloud fallback is disabled.')
     setLocalRaw('')
     try {
-      const result = await analyzeWithLocalModel(makeLocalPrompt(documents), setModelDownload)
+      const result = await analyzeWithLocalModel(makeLocalPrompt(documents, investigation.findings), setModelDownload)
       setLocalRaw(result.text)
       const diagnostics = inspectLocalReview(result.text, documents)
       const grounded = validateAIReview(result.text, documents, 'on-device')
@@ -372,7 +372,7 @@ export default function InvestigationWorkspace() {
 
         <div className="case-model-section">
           <h3>A. On-device Firebase AI Logic</h3>
-          <p>Uses Chrome's local model. File excerpts stay on the device; the model is constrained to <code>ONLY_ON_DEVICE</code>, with no fallback. A failed JSON or citation check cannot overwrite the rule-based findings.</p>
+          <p>Uses Chrome's local model on a small selection of source excerpts to limit device load. Full rule-based findings remain available. This optional review can still use significant CPU/GPU; skip it if your laptop gets hot. It is constrained to <code>ONLY_ON_DEVICE</code>, with no cloud fallback. Unsupported citations cannot overwrite rule-based findings.</p>
           <button className="outline-action" type="button" disabled={Boolean(busy) || !firebaseConfigured || !supportsChromeOnDevice() || localAttempted} onClick={localReview}>
             {busy === 'local' ? 'Local model analyzing…' : localAttempted ? 'Local review attempted' : 'Review case with on-device AI'}
           </button>

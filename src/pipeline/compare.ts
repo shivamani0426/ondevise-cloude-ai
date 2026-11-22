@@ -174,7 +174,7 @@ export function compareDocumentClaims(documents: EvidenceDocument[]): CaseFindin
 
   // Never infer contractual validity or fraud from file names or signatures.
   // A pending approval is a separate caution when documents indicate a change.
-  const pending = evidence.filter(h => /(?:signature status|signatures?|approval status|approval)\s*[:\-]?\s*(?:pending|unsigned|awaiting|incomplete)\b|\b(?:only if|unless)\s+signed\b/i.test(h.text))
+  const pending = evidence.filter(h => /(?:signature status|signatures?|approval status|approval)\s*[:-]?\s*(?:pending|unsigned|awaiting|incomplete)\b|\b(?:only if|unless)\s+signed\b/i.test(h.text))
   if (pending.length && findings.some(f => /windows|dates|fee policy/i.test(f.title))) {
     findings.push({ id:'reconcile-'+findings.length, title: 'Approval or signature status needs review',
       status:'Possible concern', origin:'rules',

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   analyzeEvidence, buildGraph, makeCloudPayload, makeLocalPrompt, findSource, redactForCloud,
-  reportInvestigation, validateAIReview, validatePrivacyCandidates, redactWithSuggestions, validateApprovedCloudPayload,
+  reportInvestigation, validateAIReview, validatePrivacyCandidates, redactWithSuggestions, validateApprovedCloudPayload, inspectLocalReview,
 } from '../src/pipeline/core.ts'
 
 const documents = [
@@ -142,4 +142,20 @@ test('exact cloud JSON must be valid, redacted, known-source data after user edi
   altered.redactedEvidence[0].id = 'source-0:invented'
   assert.match(validateApprovedCloudPayload(JSON.stringify(altered), documents), /real source ID/)
   assert.match(validateApprovedCloudPayload(draft.payload + 'NOT_JSON', documents), /valid JSON/)
+})
+
+test('on-device review distinguishes malformed JSON, invalid citations and valid empty results', () => {
+  const bad = inspectLocalReview('Not a JSON response', documents)
+  assert.equal(bad.format, 'invalid-json')
+  const empty = inspectLocalReview(JSON.stringify({ findings: [], privacyCandidates: [] }), documents)
+  assert.equal(empty.format, 'valid-json')
+  assert.match(empty.summary, /proposed no findings/)
+  const fake = inspectLocalReview(JSON.stringify({ findings: [{title:'Cross-source fee concern', detail:'Fee terms conflict and need review.', refs:['source-9:imaginary'], nextStep:'Verify source.'}], privacyCandidates:['invented name'] }), documents)
+  assert.equal(fake.rejectedCitation, 1)
+  assert.equal(fake.accepted, 0)
+  assert.equal(fake.privacyAccepted, 0)
+  const accepted = inspectLocalReview(JSON.stringify({ findings: [{title:'Cross-source fee concern', detail:'Fee terms conflict and need review.', refs:['source-0:a-1','source-1:a-0'], nextStep:'Verify official issuer.'}], privacyCandidates:['Northstar Labs'] }), documents)
+  assert.equal(accepted.accepted, 1)
+  assert.equal(accepted.privacyAccepted, 1)
+  assert.equal(accepted.rejectedCitation, 0)
 })

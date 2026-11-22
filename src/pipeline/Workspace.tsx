@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { firebaseConfigured, supportsChromeOnDevice } from '../firebase'
-import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalPrompt, reportInvestigation, validateAIReview, validatePrivacyCandidates, validateApprovedCloudPayload } from './core'
+import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalPrompt, reportInvestigation, validateAIReview, validatePrivacyCandidates, validateApprovedCloudPayload, inspectLocalReview } from './core'
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
 import { analyzeWithLocalModel, analyzeWithCloudModel } from './ai'
@@ -35,6 +35,7 @@ export default function InvestigationWorkspace() {
   const [editingRef, setEditingRef] = useState('')
   const [editedText, setEditedText] = useState('')
   const [localStatus, setLocalStatus] = useState('')
+  const [localRaw, setLocalRaw] = useState('')
   const [cloudStatus, setCloudStatus] = useState('')
   const [modelDownload, setModelDownload] = useState(0)
   const [cloudPayload, setCloudPayload] = useState('')
@@ -64,6 +65,7 @@ export default function InvestigationWorkspace() {
       setEditingRef('')
       setEditedText('')
       setLocalStatus('')
+    setLocalRaw('')
       setCloudStatus('')
       setCloudPayload('')
       setLocalAttempted(false)
@@ -126,6 +128,7 @@ export default function InvestigationWorkspace() {
     setPayloadApproved(false)
     setSparkConfirmed(false)
     setLocalStatus('')
+    setLocalRaw('')
     setLocalSensitive([])
     setCloudStatus('')
     setError('')
@@ -138,6 +141,7 @@ export default function InvestigationWorkspace() {
     setInvestigation(result)
     setSelectedFinding(result.findings[0]?.id || '')
     setLocalStatus('')
+    setLocalRaw('')
     setCloudStatus('')
     setCloudPayload('')
     setLocalAttempted(false)
@@ -151,16 +155,24 @@ export default function InvestigationWorkspace() {
     setLocalAttempted(true)
     setModelDownload(0)
     setLocalStatus('Preparing local Firebase AI Logic model. Cloud fallback is disabled.')
+    setLocalRaw('')
     try {
       const result = await analyzeWithLocalModel(makeLocalPrompt(documents), setModelDownload)
+      setLocalRaw(result.text)
+      const diagnostics = inspectLocalReview(result.text, documents)
       const grounded = validateAIReview(result.text, documents, 'on-device')
       const proposedPrivate = validatePrivacyCandidates(result.text, documents)
       setLocalSensitive(proposedPrivate)
+      // Any earlier cloud preview was built without these newly approved local
+      // privacy suggestions. Invalidate its contents and prior consent.
+      setCloudPayload('')
+      setPayloadApproved(false)
+      setSparkConfirmed(false)
+      setCloudStatus('Local review finished. Prepare a new redacted cloud preview if you want an optional cloud analysis.')
       setInvestigation(previous => previous ? { ...previous, findings: [
         ...previous.findings.filter(finding => finding.origin !== 'on-device'), ...grounded,
       ] } : previous)
-      setLocalStatus('Verified ' + result.source + '. ' + grounded.length + ' source-grounded AI hypotheses and ' + proposedPrivate.length + ' literal privacy candidates accepted. ' +
-        (grounded.length ? 'Review every citation.' : 'Other output was rejected because its source references or JSON structure could not be verified.'))
+      setLocalStatus('Verified ' + result.source + '. ' + diagnostics.summary)
     } catch (reason) {
       setLocalStatus('Local AI review not completed: ' + describeError(reason) + '. No automatic cloud fallback.')
     } finally {
@@ -216,6 +228,7 @@ export default function InvestigationWorkspace() {
     setEditingRef('')
     setEditedText('')
     setLocalStatus('')
+    setLocalRaw('')
     setCloudStatus('')
     setCloudPayload('')
     setSparkConfirmed(false)
@@ -365,6 +378,10 @@ export default function InvestigationWorkspace() {
           </button>
           {modelDownload > 0 && modelDownload < 1 && <p>Local model download: {Math.round(modelDownload * 100)}%</p>}
           {localStatus && <p className="case-status" role="status">{localStatus}</p>}
+          {localRaw && <details className="case-excerpt"><summary>Inspect local model response (may contain private text)</summary>
+            <p className="case-caution">This response stays in page memory. Do not share it if your documents contain personal information.</p>
+            <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 280, overflowY: 'auto', fontSize: 12 }}>{localRaw}</pre>
+          </details>}
           {!supportsChromeOnDevice() && <p className="case-warn">Local AI requires Chrome desktop. Rule analysis and cloud review do not.</p>}
         </div>
 

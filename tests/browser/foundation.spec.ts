@@ -63,3 +63,24 @@ test('no evidence or AI requests are sent when exploring the fictional sample', 
   await expect(page.getByText('Not configured on Render')).toBeVisible()
   expect(outbound).toEqual([])
 })
+
+
+test('Overview keeps AI diagnostics opt-in, not silently invoked during browsing', async ({ page }) => {
+  const aiRequests: string[] = []
+  page.on('request', request => {
+    if (/generativelanguage|firebaseappcheck|firebasevertexai/i.test(request.url())) aiRequests.push(request.url())
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Overview' }).click()
+  await expect(page.getByRole('heading', { name: 'Hybrid inference readiness' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Verify App Check token' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Test on-device inference' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Send one fictional cloud test' })).toBeDisabled()
+  const consent = page.getByRole('checkbox', { name: /I checked that this Firebase project/ })
+  await consent.check()
+  // Missing Firebase config in this CI build must still block every cloud request.
+  await expect(page.getByRole('button', { name: 'Send one fictional cloud test' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Investigation' }).click()
+  await expect(page.getByRole('heading', { name: 'Evidence relationship graph' })).toBeVisible()
+  expect(aiRequests).toEqual([])
+})

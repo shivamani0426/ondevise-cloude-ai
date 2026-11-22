@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { evidence, findings, nodes, edges, reportText, type Finding } from './demo'
-import { firebaseConfigured, verifyAppCheck } from './firebase'
+import { firebaseConfigured, verifyAppCheck, runDeviceProbe, runCloudProbe, supportsChromeOnDevice } from './firebase'
 
 type Section = 'overview' | 'evidence' | 'findings' | 'investigation' | 'report'
 const sections: { key: Section; name: string }[] = [
@@ -23,6 +23,13 @@ export default function App() {
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [appCheckResult, setAppCheckResult] = useState('')
   const [checkingAppCheck, setCheckingAppCheck] = useState(false)
+  const [probeRunning, setProbeRunning] = useState<'device' | 'cloud' | null>(null)
+  const [deviceResult, setDeviceResult] = useState('')
+  const [cloudResult, setCloudResult] = useState('')
+  const [deviceDownloadProgress, setDeviceDownloadProgress] = useState(0)
+  const [sparkConfirmed, setSparkConfirmed] = useState(false)
+  const [cloudProbeAttempted, setCloudProbeAttempted] = useState(false)
+  const canUseOnDevice = supportsChromeOnDevice()
   const dialogRef = useRef<HTMLDivElement>(null)
   const currentFinding = findings.find((finding) => finding.id === selectedFinding) || findings[0]
   const currentEvidence = evidence.find((item) => item.id === selectedEvidence) || evidence[0]
@@ -86,6 +93,37 @@ export default function App() {
     try { setAppCheckResult(await verifyAppCheck()) } finally { setCheckingAppCheck(false) }
   }
 
+  async function testDeviceInference() {
+    setProbeRunning('device')
+    setDeviceDownloadProgress(0)
+    setDeviceResult('Preparing the on-device model. No cloud fallback is allowed.')
+    try {
+      // runDeviceProbe initializes the local model from this direct button activation.
+      const result = await runDeviceProbe(setDeviceDownloadProgress)
+      setDeviceResult('Verified ' + result.source + ' inference. Model replied: ' + result.text)
+    } catch (error) {
+      setDeviceResult('On-device inference not verified: ' + (error instanceof Error ? error.message : 'Unknown error') + '. No cloud fallback was attempted.')
+    } finally {
+      setProbeRunning(null)
+    }
+  }
+
+  async function testCloudInference() {
+    if (!sparkConfirmed || cloudProbeAttempted) return
+    setCloudProbeAttempted(true)
+    setProbeRunning('cloud')
+    setCloudResult('Sending one fixed fictional test prompt, not case evidence.')
+    try {
+      const result = await runCloudProbe()
+      setAppCheckResult('App Check token obtained on this browser.')
+      setCloudResult('Verified ' + result.source + ' inference with Gemini Developer API. Model replied: ' + result.text)
+    } catch (error) {
+      setCloudResult('Cloud inference not verified: ' + (error instanceof Error ? error.message : 'Unknown error') + '. No case evidence was sent.')
+    } finally {
+      setProbeRunning(null)
+    }
+  }
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">Skip to investigation content</a>
@@ -100,21 +138,40 @@ export default function App() {
           {sections.map((item) => <button key={item.key} className={'nav-item ' + (section === item.key ? 'active' : '')} type="button" onClick={() => setSection(item.key)} aria-current={section === item.key ? 'page' : undefined}>{item.name}</button>)}
           <div className="sidebar-foot">
             <span className="green-dot" /> Sample data stays in this browser
-            <p>Cloud AI and actual on-device AI are not active in this demo.</p>
+            <p>Investigation is scripted; AI is available only in optional, separate diagnostics.</p>
           </div>
         </nav>
 
         <main className="main-panel" id="main" tabIndex={-1}>
           {section === 'overview' && (
             <>
-              <div className="section-heading"><p className="eyebrow">CASE 01 · FICTIONAL INTERNSHIP</p><h1>Case overview</h1><p>Compare documents and trace every concern back to evidence. This demo uses no uploaded files or AI service.</p></div>
+              <div className="section-heading"><p className="eyebrow">CASE 01 · FICTIONAL INTERNSHIP</p><h1>Case overview</h1><p>Compare fictional documents and trace concerns to evidence. Investigation stays scripted; optional AI diagnostics do not analyze case files.</p></div>
               <div className="metric-grid">
                 <div className="metric"><span>Sample evidence</span><strong>03</strong><small>Fictional source items</small></div>
                 <div className="metric"><span>Tracked findings</span><strong>04</strong><small>Not fraud judgments</small></div>
-                <div className="metric"><span>Cloud submissions</span><strong>00</strong><small>None sent</small></div>
+                <div className="metric"><span>Case files uploaded</span><strong>00</strong><small>None sent</small></div>
               </div>
               <article className="info-card"><h2>Why this case matters</h2><p>A job offer promises ₹35,000 per month, but a recruiter message asks for a ₹2,499 verification fee and names a differently spelled website. These details warrant independent checks. They do not prove wrongdoing.</p><button className="primary-action" onClick={() => setSection('investigation')}>Explore evidence graph <span aria-hidden="true">→</span></button></article>
-              <article className="info-card"><h2>Hybrid inference readiness</h2><p>Firebase registration and App Check are managed in your Firebase Console. This deployment must obtain its own valid App Check token and then prove local and cloud inference before we enable analysis.</p><p className="small-muted">Web configuration: {firebaseConfigured ? 'Provided (not yet attested)' : 'Not configured on Render'}</p><button className="outline-action" disabled={!firebaseConfigured || checkingAppCheck} onClick={testAttestation}>{checkingAppCheck ? 'Verifying…' : 'Verify App Check token'}</button>{appCheckResult && <p className="status-message" role="status">{appCheckResult}</p>}</article>
+              <article className="info-card">
+                <h2>Hybrid inference readiness</h2>
+                <p>Real Firebase AI Logic connectivity checks use fixed fictional text only. These diagnostics never analyze the investigation, upload case documents, or automatically fall back to a cloud model.</p>
+                <p className="small-muted">Web configuration: {firebaseConfigured ? (appCheckResult.startsWith('App Check token obtained') ? 'Provided; App Check verified in this browser session' : 'Provided; App Check not yet verified in this session') : 'Not configured on Render'}</p>
+                <button className="outline-action" type="button" disabled={!firebaseConfigured || checkingAppCheck || Boolean(probeRunning)} onClick={testAttestation}>{checkingAppCheck ? 'Verifying…' : 'Verify App Check token'}</button>
+                {appCheckResult && <p className="status-message" role="status">{appCheckResult}</p>}
+                <div className="probe-divider" />
+                <h3>1. Test on-device AI</h3>
+                <p className="small-muted">Chrome Desktop 139+ with Prompt API enabled is required. Firefox does not support Firebase's web on-device model. This test never calls cloud inference.</p>
+                <button className="outline-action" type="button" disabled={!firebaseConfigured || !canUseOnDevice || Boolean(probeRunning) || checkingAppCheck} onClick={testDeviceInference}>{probeRunning === 'device' ? 'Testing local model…' : 'Test on-device inference'}</button>
+                {deviceDownloadProgress > 0 && deviceDownloadProgress < 1 && <p className="small-muted">Local model download: {Math.round(deviceDownloadProgress * 100)}%</p>}
+                {deviceResult && <p className="status-message" role="status">{deviceResult}</p>}
+                <div className="probe-divider" />
+                <h3>2. Test Firebase cloud AI</h3>
+                <p className="small-muted">Uses Gemini Developer API model gemini-3.5-flash-lite. One fixed fictional prompt is sent only when you click the button. No investigation data is uploaded. Free-tier quota limits apply.</p>
+                <label className="probe-consent"><input type="checkbox" checked={sparkConfirmed} onChange={(event) => setSparkConfirmed(event.target.checked)} /> I checked that this Firebase project is on the no-cost Spark plan and has no billing account linked.</label>
+                <button className="outline-action" type="button" disabled={!firebaseConfigured || !sparkConfirmed || cloudProbeAttempted || Boolean(probeRunning) || checkingAppCheck} onClick={testCloudInference}>{probeRunning === 'cloud' ? 'Testing cloud model…' : cloudProbeAttempted ? 'Cloud probe attempted (refresh to retry)' : 'Send one fictional cloud test'}</button>
+                {cloudResult && <p className="status-message" role="status">{cloudResult}</p>}
+                <p className="small-muted">App Check token retrieval and AI inference are separate checks. A passed App Check test alone is not proof that cloud or local AI works.</p>
+              </article>
             </>
           )}
 
@@ -174,7 +231,7 @@ export default function App() {
           <h4>NEXT CHECK</h4><p>{currentFinding.nextStep}</p>
           <button className="primary-action inspector-action" onClick={() => openEvidence(currentFinding.evidenceIds.includes(selectedEvidence) ? selectedEvidence : currentFinding.evidenceIds[0])}>Open source snippet <span aria-hidden="true">↗</span></button>
           <button className="privacy-action" onClick={() => setPrivacyOpen((value) => !value)} aria-expanded={privacyOpen}>Privacy and cloud controls {privacyOpen ? '−' : '+'}</button>
-          {privacyOpen && <div className="privacy-panel"><strong>Local-only demonstration</strong><p>Original real-world evidence is not accepted here. Firebase AI Logic and cloud submission have not been connected; no background fallback or cloud call is running.</p><p>Future cloud flow: local extraction → redact → preview exact payload → explicit approval → request with verified inference source.</p></div>}
+          {privacyOpen && <div className="privacy-panel"><strong>Fictional investigation only</strong><p>Real-world evidence is not accepted. Optional Overview connectivity probes may use fixed fictional text, never this case's evidence. Investigation itself never calls cloud or local AI.</p><p>Future cloud flow: local extraction → redact → preview exact payload → explicit approval → request with verified inference source.</p></div>}
         </aside>
       </div>
 
@@ -186,7 +243,7 @@ export default function App() {
         </div>
       </div>}
 
-      <footer className="footer">PHANTOMGRAPH AI · SOURCE FIRST · DEMO ONLY <span>Designed for privacy-preserving hybrid inference — not yet connected to AI.</span></footer>
+      <footer className="footer">PHANTOMGRAPH AI · SOURCE FIRST · DEMO ONLY <span>Fictional investigation · opt-in AI connectivity tests only</span></footer>
     </div>
   )
 }

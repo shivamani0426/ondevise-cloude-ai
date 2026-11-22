@@ -32,6 +32,8 @@ export default function InvestigationWorkspace() {
   const [error, setError] = useState('')
   const [selectedRef, setSelectedRef] = useState('')
   const [selectedFinding, setSelectedFinding] = useState('')
+  const [editingRef, setEditingRef] = useState('')
+  const [editedText, setEditedText] = useState('')
   const [localStatus, setLocalStatus] = useState('')
   const [cloudStatus, setCloudStatus] = useState('')
   const [modelDownload, setModelDownload] = useState(0)
@@ -57,6 +59,8 @@ export default function InvestigationWorkspace() {
       setInvestigation(null)
       setSelectedRef('')
       setSelectedFinding('')
+      setEditingRef('')
+      setEditedText('')
       setLocalStatus('')
       setCloudStatus('')
       setCloudPayload('')
@@ -104,6 +108,26 @@ export default function InvestigationWorkspace() {
     }
   }
 
+  function saveCorrection() {
+    if (busy || !editingRef || !editedText.trim() || editedText.length > 3500) {
+      setError('Enter a corrected excerpt between 1 and 3,500 characters.')
+      return
+    }
+    setDocuments(previous => previous.map(doc => ({ ...doc, segments: doc.segments.map(segment =>
+      doc.id + ':' + segment.id === editingRef ? { ...segment, text: editedText.trim() } : segment) })))
+    setInvestigation(null)
+    setSelectedFinding('')
+    setEditingRef('')
+    setEditedText('')
+    setCloudPayload('')
+    setPayloadApproved(false)
+    setSparkConfirmed(false)
+    setLocalStatus('')
+    setCloudStatus('')
+    setError('')
+    setStatus('Correction saved only in browser memory. Re-run analysis to refresh all findings and graph links.')
+  }
+
   function analyze() {
     if (busy || !documents.length) return
     const result = analyzeEvidence(documents)
@@ -112,7 +136,6 @@ export default function InvestigationWorkspace() {
     setLocalStatus('')
     setCloudStatus('')
     setCloudPayload('')
-    setCloudAttempted(false)
     setLocalAttempted(false)
     setStatus('Evidence graph and ' + result.findings.length + ' rule-based findings created locally.')
     setError('')
@@ -184,6 +207,8 @@ export default function InvestigationWorkspace() {
     setInvestigation(null)
     setSelectedRef('')
     setSelectedFinding('')
+    setEditingRef('')
+    setEditedText('')
     setLocalStatus('')
     setCloudStatus('')
     setCloudPayload('')
@@ -224,7 +249,7 @@ export default function InvestigationWorkspace() {
           <label htmlFor="evidence-upload" className="upload-label">Choose documents or drop them here</label>
           <input id="evidence-upload" type="file" multiple accept={acceptedFileTypes} onChange={onFileInput} disabled={Boolean(busy)}/>
           <p>PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPEG. Up to {MAX_FILES} files, {Math.round(MAX_FILE_BYTES / 1024 / 1024)} MiB each (24 MiB combined).</p>
-          <p>Scanned PDFs and images use local OCR. OCR language assets may be downloaded; document pixels are not uploaded. Unreadable documents are rejected rather than silently skipped.</p>
+          <p>Scanned PDFs and images use local OCR. OCR language assets may be downloaded; document pixels are not uploaded. Unreadable excerpts are clearly marked for manual correction; failed file parsing is not silently skipped.</p>
         </div>
         {files.length > 0 && <div className="upload-selection"><strong>Selected for local extraction:</strong>{files.map((file, i) => <span key={i}>{file.name} · {describeSize(file.size)}</span>)}</div>}
         <div className="case-actions">
@@ -246,6 +271,24 @@ export default function InvestigationWorkspace() {
             <button className="outline-action" onClick={() => setSelectedRef(doc.id + ':' + doc.segments[0].id)}>Inspect first excerpt</button>
           </article>)}
         </div>
+        {excerpt && <article className="case-excerpt">
+          <div className="case-panel-top"><h3>Source excerpt: {excerpt.document.name}</h3><span>{excerpt.segment.anchor}</span></div>
+          <p className="case-caution">Quoted locally extracted text, not independent verification of authenticity. Correct OCR or formatting mistakes here before analyzing.</p>
+          <blockquote>{excerpt.segment.text}</blockquote>
+          {editingRef === selectedRef ? <>
+            <label className="case-editor-label" htmlFor="manual-excerpt-correction">Correct extracted excerpt locally</label>
+            <textarea id="manual-excerpt-correction" className="case-payload" maxLength={3500} rows={5} value={editedText}
+              onChange={event => setEditedText(event.target.value)} disabled={Boolean(busy)}/>
+            <div className="case-actions"><button className="primary-action" onClick={saveCorrection} disabled={Boolean(busy) || !editedText.trim()}>Save correction and invalidate old analysis</button>
+              <button className="outline-action" onClick={() => setEditingRef('')}>Cancel</button></div>
+          </> : <button className="outline-action" type="button" disabled={Boolean(busy)} onClick={() => { setEditingRef(selectedRef); setEditedText(excerpt.segment.text) }}>Correct this excerpt</button>}
+          <details><summary>Browse other anchors in this source</summary><div className="case-anchor-list">
+            {excerpt.document.segments.map(segment => <button key={segment.id} type="button" onClick={() => { setEditingRef(''); setSelectedRef(excerpt.document.id + ':' + segment.id) }}>
+              {segment.anchor} · {segment.text.slice(0, 100)}
+            </button>)}
+          </div></details>
+        </article>}
+
         <button className="primary-action" type="button" disabled={Boolean(busy)} onClick={analyze}>Build evidence graph and findings</button>
       </section>}
 
@@ -301,16 +344,6 @@ export default function InvestigationWorkspace() {
           })}</div>
         </article>}
 
-        {excerpt && <article className="case-excerpt">
-          <div className="case-panel-top"><h3>Source excerpt: {excerpt.document.name}</h3><span>{excerpt.segment.anchor}</span></div>
-          <p className="case-caution">Quoted extracted text, not independent verification of authenticity.</p>
-          <blockquote>{excerpt.segment.text}</blockquote>
-          <details><summary>Browse other anchors in this source</summary><div className="case-anchor-list">
-            {excerpt.document.segments.map(segment => <button key={segment.id} type="button" onClick={() => setSelectedRef(excerpt.document.id + ':' + segment.id)}>
-              {segment.anchor} · {segment.text.slice(0, 100)}
-            </button>)}
-          </div></details>
-        </article>}
       </section>}
 
       {investigation && <section className="case-panel" aria-labelledby="ai-review-title">
@@ -354,9 +387,9 @@ export default function InvestigationWorkspace() {
 
       {investigation && <section className="case-panel" aria-labelledby="report-title">
         <div className="case-panel-top"><h2 id="report-title">5. Export or delete case</h2><span className="case-tag">No server storage</span></div>
-        <p>Download a local text report with document references, findings, uncertainties and exact citations. The report itself may include sensitive text; store it responsibly.</p>
+        <p>Download a redacted local text report with document IDs, findings and source anchors. Original filenames are omitted. Automatic masking is incomplete, so read the report before sharing.</p>
         <div className="case-actions">
-          <button className="primary-action" onClick={() => saveText('phantomgraph-investigation-report.txt', reportInvestigation(investigation))} disabled={Boolean(busy)}>Download investigation report</button>
+          <button className="primary-action" onClick={() => saveText('phantomgraph-redacted-report.txt', reportInvestigation(investigation))} disabled={Boolean(busy)}>Download redacted investigation report</button>
           <button className="outline-action" onClick={clearAll} disabled={Boolean(busy)}>Clear case from memory</button>
         </div>
       </section>}

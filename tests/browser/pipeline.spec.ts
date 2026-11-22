@@ -270,7 +270,39 @@ test('generic invoice matching is visible in the real local evidence graph and n
   await expect(page.locator('.case-detail h3')).toHaveText('Same reference, different recorded field values')
   await expect(page.locator('.case-detail')).toContainText('amount usd')
   await expect(page.locator('.case-citations .inline-link')).toHaveCount(3)
+  const reasoning = page.locator('.case-detail .case-explanation')
+  await reasoning.locator('summary').click()
+  await expect(reasoning).toContainText('Evidence basis:')
+  await expect(reasoning).toContainText('Context check:')
+  await expect(reasoning).toContainText('350')
+  await expect(reasoning).toContainText('450')
+  await expect(reasoning).toContainText('does not authenticate')
   await page.getByRole('button',{name:'Prepare locally redacted cloud preview'}).click()
   await expect(page.getByRole('button',{name:'Send this exact approved payload once'})).toBeDisabled()
   expect(outgoing).toEqual([])
+})
+
+
+test('Pipeline 7: unrelated status updates are explained without a false fraud verdict or cloud request',async ({page})=>{
+  const sent=[]
+  page.on('request',request=>{
+    if (/firebasevertexai|generativelanguage|attacker\.example/i.test(request.url())) sent.push(request.url())
+  })
+  await openWorkspace(page)
+  await page.locator('#evidence-upload').setInputFiles([
+    txt('case_a.txt','Case ID: CASE-2027-9999\nstatus: open'),
+    txt('case_b.txt','Case ID: CASE-2027-9999\nstatus: closed'),
+  ])
+  await page.getByRole('button',{name:'Extract selected files locally'}).click()
+  await page.getByRole('button',{name:'Build evidence graph and findings'}).click()
+  await page.locator('.case-findings .case-finding').filter({
+    hasText:'Same reference, context-dependent recorded change'
+  }).click()
+  const detail=page.locator('.case-detail')
+  await expect(detail.getByRole('heading',{name:'Same reference, context-dependent recorded change'})).toBeVisible()
+  await expect(detail).toContainText('UNVERIFIED HYPOTHESIS')
+  await detail.locator('.case-explanation summary').click()
+  await expect(detail.locator('.case-explanation')).toContainText('status that may change over time')
+  await expect(detail.locator('.case-citations .inline-link')).toHaveCount(2)
+  expect(sent).toEqual([])
 })

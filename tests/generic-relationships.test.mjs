@@ -10,6 +10,7 @@ const file = (i, format, parts, name='sample') => ({
 const matches=(docs)=>relateEvidence(docs)
 const differing=(findings)=>findings.filter(x=>/Same reference, different/.test(x.title))
 const shared=(findings)=>findings.filter(x=>/Shared structured reference/.test(x.title))
+const contextual=(findings)=>findings.filter(x=>/Same reference, context-dependent/.test(x.title))
 function anchored(docs, findings) {
   for(const finding of findings) {
     assert.equal(finding.origin,'rules')
@@ -28,10 +29,14 @@ test('invoice comparison links a PDF reference to a CSV row and reports field di
   const findings=matches(docs)
   assert.equal(differing(findings).length,1)
   assert.match(findings[0].detail,/amount usd/)
-  assert.match(findings[0].detail,/different extracted values/)
+  assert.match(findings[0].detail,/extracted values differ/)
   assert.ok(findings[0].refs.includes('source-0:a-0'))
   assert.ok(findings[0].refs.includes('source-0:a-1'))
   assert.ok(findings[0].refs.includes('source-1:a-1'))
+  assert.equal(findings[0].explanation.compared.length,2)
+  assert.equal(findings[0].explanation.compared[0].value,'350')
+  assert.equal(findings[0].explanation.compared[1].value,'450')
+  assert.match(findings[0].explanation.limitation,/does not authenticate/)
   anchored(docs,findings)
   assert.ok(analyzeEvidence(docs).findings.some(f=>f.title==='Same reference, different recorded field values'))
 })
@@ -42,9 +47,10 @@ test('payment records use identical transaction IDs but changing status is not p
     file(1,'JSON',['{ "transaction_id": "TXN-2027-0158",','"status": "settled" }']),
   ]
   const result=matches(docs)
-  assert.equal(differing(result).length,1)
-  assert.match(result[0].detail,/status/)
-  assert.match(result[0].detail,/updated, provisional/)
+  assert.equal(differing(result).length,0)
+  assert.equal(contextual(result).length,1)
+  assert.equal(result[0].status,'Unverified hypothesis')
+  assert.match(result[0].explanation.context,/status.*change over time/i)
   anchored(docs,result)
 })
 
@@ -54,8 +60,9 @@ test('contract amendments with the same contract ID but different effective date
     file(1,'TXT',['contract_number: CNTR-2027-0099','effective_date: 2027-04-01','signed: pending']),
   ]
   const findings=matches(docs)
-  assert.equal(differing(findings).length,1)
-  assert.match(findings[0].detail,/effective date/)
+  assert.equal(differing(findings).length,0)
+  assert.equal(contextual(findings).length,1)
+  assert.match(findings[0].explanation.context,/approval or signature context/i)
   anchored(docs,findings)
 })
 
@@ -77,7 +84,8 @@ test('application records in education/benefits are linked using the same generi
     file(0,'MD',['Application reference: APP-2027-0303','application_status: submitted']),
     file(1,'JSON',['"application_id": "APP-2027-0303",','"application_status": "verified"']),
   ]
-  assert.equal(differing(matches(docs)).length,1)
+  assert.equal(differing(matches(docs)).length,0)
+  assert.equal(contextual(matches(docs)).length,1)
   anchored(docs,matches(docs))
 })
 

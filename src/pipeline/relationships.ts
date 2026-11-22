@@ -118,7 +118,7 @@ function readRecord(document: EvidenceDocument): RecordData {
     // Ordinary narrative: "Invoice number INV-..."; "Reference: ...";
     // "Shipment ID: ...". Nothing is matched without a recognizable field
     // label and a structured alphanumeric identifier.
-    const narrative = /\b(invoice|order|transaction|payment|receipt|contract|agreement|shipment|tracking|booking|reservation|claim|case|policy|application|reference|ticket)\s*(?:id|no\.?|number|ref(?:erence)?|#)?\s*[:#=\-]?\s*([A-Za-z][A-Za-z0-9_-]{5,47})\b/gi
+    const narrative = /\b(invoice|order|transaction|payment|receipt|contract|agreement|shipment|tracking|booking|reservation|claim|case|policy|application|reference|ticket)\s*(?:id|no\.?|number|ref(?:erence)?|#)?\s*[:#=-]?\s*([A-Za-z][A-Za-z0-9_-]{5,47})\b/gi
     for (const m of segment.text.matchAll(narrative)) {
       addIdentifier(identifiers, document.id, ref, m[1].toLowerCase(), m[2])
     }

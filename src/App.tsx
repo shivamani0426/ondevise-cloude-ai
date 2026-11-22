@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { evidence, findings, nodes, edges, reportText, type Finding } from './demo'
 import { firebaseConfigured, verifyAppCheck, runDeviceProbe, runCloudProbe, supportsChromeOnDevice } from './firebase'
+import InvestigationWorkspace from './pipeline/Workspace'
 
-type Section = 'overview' | 'evidence' | 'findings' | 'investigation' | 'report'
+type Section = 'overview' | 'workspace' | 'evidence' | 'findings' | 'investigation' | 'report'
 const sections: { key: Section; name: string }[] = [
   { key: 'overview', name: 'Overview' },
+  { key: 'workspace', name: 'Analyze Documents' },
   { key: 'evidence', name: 'Evidence (3)' },
   { key: 'findings', name: 'Findings (4)' },
   { key: 'investigation', name: 'Investigation' },
@@ -129,20 +131,21 @@ export default function App() {
       <a className="skip-link" href="#main">Skip to investigation content</a>
       <header className="topbar">
         <div className="brand"><span className="brand-symbol">◇</span> PHANTOMGRAPH <span className="brand-suffix">AI</span></div>
-        <div className="top-status"><span>CASE 01</span><span className="dot">•</span><span>Local data only</span><span className="demo-pill">FICTIONAL DEMO</span></div>
+        <div className="top-status"><span>CASE 01</span><span className="dot">•</span><span>Local data only</span><span className="demo-pill">{section === 'workspace' ? 'PRIVATE CASE' : 'FICTIONAL DEMO'}</span></div>
       </header>
 
-      <div className="layout">
+      <div className={'layout' + (section === 'workspace' ? ' real-workspace-mode' : '')}>
         <nav className="sidebar" aria-label="Investigation sections">
           <p className="sidebar-title">WORKSPACE</p>
           {sections.map((item) => <button key={item.key} className={'nav-item ' + (section === item.key ? 'active' : '')} type="button" onClick={() => setSection(item.key)} aria-current={section === item.key ? 'page' : undefined}>{item.name}</button>)}
           <div className="sidebar-foot">
             <span className="green-dot" /> Sample data stays in this browser
-            <p>Investigation is scripted; AI is available only in optional, separate diagnostics.</p>
+            <p>{section === 'workspace' ? 'Your case is held only in page memory. Cloud review requires explicit approval.' : 'Sample investigation is scripted; AI is optional.'}</p>
           </div>
         </nav>
 
         <main className="main-panel" id="main" tabIndex={-1}>
+          {section === 'workspace' && <InvestigationWorkspace />}
           {section === 'overview' && (
             <>
               <div className="section-heading"><p className="eyebrow">CASE 01 · FICTIONAL INTERNSHIP</p><h1>Case overview</h1><p>Compare fictional documents and trace concerns to evidence. Investigation stays scripted; optional AI diagnostics do not analyze case files.</p></div>
@@ -222,7 +225,7 @@ export default function App() {
           )}
         </main>
 
-        <aside className="inspector" aria-label="Finding details and source references">
+        {section !== 'workspace' && <aside className="inspector" aria-label="Finding details and source references">
           <div className="inspector-heading"><h2>Finding details</h2><span className={'state-chip ' + statusClass(currentFinding.status)}>{currentFinding.status}</span></div>
           <h3>{currentFinding.title}</h3>
           <p>{currentFinding.description}</p>
@@ -232,7 +235,7 @@ export default function App() {
           <button className="primary-action inspector-action" onClick={() => openEvidence(currentFinding.evidenceIds.includes(selectedEvidence) ? selectedEvidence : currentFinding.evidenceIds[0])}>Open source snippet <span aria-hidden="true">↗</span></button>
           <button className="privacy-action" onClick={() => setPrivacyOpen((value) => !value)} aria-expanded={privacyOpen}>Privacy and cloud controls {privacyOpen ? '−' : '+'}</button>
           {privacyOpen && <div className="privacy-panel"><strong>Fictional investigation only</strong><p>Real-world evidence is not accepted. Optional Overview connectivity probes may use fixed fictional text, never this case's evidence. Investigation itself never calls cloud or local AI.</p><p>Future cloud flow: local extraction → redact → preview exact payload → explicit approval → request with verified inference source.</p></div>}
-        </aside>
+        </aside>}
       </div>
 
       {sourceOpen && <div className="modal-backdrop" onClick={() => setSourceOpen(false)}>
@@ -243,7 +246,7 @@ export default function App() {
         </div>
       </div>}
 
-      <footer className="footer">PHANTOMGRAPH AI · SOURCE FIRST · DEMO ONLY <span>Fictional investigation · opt-in AI connectivity tests only</span></footer>
+      <footer className="footer">PHANTOMGRAPH AI · SOURCE FIRST <span>{section === 'workspace' ? 'Local extraction · source-linked findings · optional consented cloud analysis' : 'Fictional sample · opt-in AI diagnostics'}</span></footer>
     </div>
   )
 }

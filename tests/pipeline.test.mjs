@@ -159,3 +159,33 @@ test('on-device review distinguishes malformed JSON, invalid citations and valid
   assert.equal(accepted.privacyAccepted, 1)
   assert.equal(accepted.rejectedCitation, 0)
 })
+
+test('fast local prompt uses bounded context and preserves both sides of a discrepancy', () => {
+  const result = analyzeEvidence(documents)
+  const prompt = makeLocalPrompt(documents, result.findings)
+  assert.ok(prompt.length <= 2300, 'Prompt exceeded local compute budget')
+  assert.match(prompt, /SOURCE source-0:a-1/)
+  assert.match(prompt, /SOURCE source-1:a-0/)
+  assert.match(prompt, /at most ONE/)
+})
+
+test('model cannot assert a cross-document conflict supported by one source only', () => {
+  const undercited = JSON.stringify({findings:[{
+    title: 'Payment Fee Discrepancy',
+    detail: 'The offer says no registration fees while the recruiter demands payment.',
+    refs:['source-1:a-0'],
+    nextStep:'Confirm with issuer',
+  }], privacyCandidates: []})
+  assert.deepEqual(validateAIReview(undercited, documents, 'on-device'), [])
+  const diag = inspectLocalReview(undercited, documents)
+  assert.equal(diag.rejectedSupport, 1)
+  assert.equal(diag.rejectedCitation, 0)
+  assert.match(diag.summary, /incomplete cross-source citations/)
+  const supported = JSON.stringify({findings:[{
+    title: 'Payment Fee Discrepancy',
+    detail: 'The offer says no registration fees while the recruiter demands payment.',
+    refs:['source-0:a-1','source-1:a-0'],
+    nextStep:'Confirm with issuer',
+  }], privacyCandidates: []})
+  assert.equal(validateAIReview(supported, documents, 'on-device').length, 1)
+})

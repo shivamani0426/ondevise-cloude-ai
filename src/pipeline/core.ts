@@ -534,6 +534,10 @@ export function reportInvestigation(investigation: Investigation, suggestions: s
       const origin = findSource(investigation.documents, ref)
       if (origin) lines.push('  ' + ref + ' | ' + origin.segment.anchor + ' | ' + safe(limit(origin.segment.text, 280)))
     }
+    if (finding.quotes?.length) {
+      lines.push('AI-selected literal quotations (text-match only; meanings unverified):')
+      for (const quote of finding.quotes) lines.push('  ' + quote.ref + ' | ' + safe(quote.quote))
+    }
   }
   lines.push('', 'ENTITIES (sensitive values automatically masked)')
   for (const entity of investigation.entities) lines.push(entity.kind + ': ' + safe(entity.label) + ' (' + entity.refs.join(', ') + ')')

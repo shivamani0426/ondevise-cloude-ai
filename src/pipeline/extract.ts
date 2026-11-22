@@ -111,6 +111,7 @@ async function readImage(file: File): Promise<{ segments: SourceSegment[]; warni
   try {
     const result = await worker.recognize(canvas)
     const segments = makeSegments(result.data.text)
+    if (!segments.length) segments.push({ id: 'a-0', anchor: 'image (needs correction)', text: '[No readable image text. Replace this placeholder with a manual transcription.]' })
     return {
       segments,
       warnings: ['Image text was estimated by browser-side OCR and may contain mistakes.' +
@@ -162,14 +163,15 @@ async function readPDF(file: File): Promise<{ segments: SourceSegment[]; warning
           try {
             await page.render({ canvasContext: ctx, canvas, viewport: view }).promise
             const result = await ocrWorker.recognize(canvas)
-            if (result.data.text.trim()) segments.push({ id: 'a-' + segments.length, anchor: 'page ' + pageNumber + ' (OCR)', text: result.data.text.trim().slice(0, 3600) })
+            segments.push({ id: 'a-' + segments.length, anchor: 'page ' + pageNumber + ' (OCR)', text: result.data.text.trim().slice(0, 3600) || '[No extractable text on this page. Replace with a manual transcription.]' })
           } finally {
             canvas.width = 0
             canvas.height = 0
           }
           warnings.push('Page ' + pageNumber + ' required OCR; check its transcription against the source.')
         } else {
-          warnings.push('Page ' + pageNumber + ' had no extractable text. Scanned-page OCR is limited to the first four pages.')
+          segments.push({ id: 'a-' + segments.length, anchor: 'page ' + pageNumber + ' (needs correction)', text: '[No extractable text on this page. Replace with a manual transcription.]' })
+          warnings.push('Page ' + pageNumber + ' had no extractable text. Manually transcribe pages beyond the first four.')
         }
         page.cleanup()
         if (segments.reduce((sum, segment) => sum + segment.text.length, 0) > MAX_TEXT_PER_DOC) {
@@ -195,6 +197,7 @@ export async function extractLocalFile(file: File, id: string): Promise<Evidence
   else if (['.png', '.jpg', '.jpeg'].includes(ext)) result = await readImage(file)
   else {
     const raw = await file.text()
+    if (raw.includes('\0')) throw new Error('This text file contains binary data and cannot be parsed safely.')
     result = { segments: makeSegments(raw), warnings: [] }
   }
   if (!result.segments.length) throw new Error('No readable text was extracted from ' + file.name + '. Check document quality or format.')

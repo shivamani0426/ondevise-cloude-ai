@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { firebaseConfigured, supportsChromeOnDevice } from '../firebase'
-import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalPrompt, reportInvestigation, validateAIReview, validatePrivacyCandidates } from './core'
+import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalPrompt, reportInvestigation, validateAIReview, validatePrivacyCandidates, validateApprovedCloudPayload } from './core'
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
 import { analyzeWithLocalModel, analyzeWithCloudModel } from './ai'
@@ -50,6 +50,7 @@ export default function InvestigationWorkspace() {
   const graph = useMemo(() => investigation ? buildGraph(investigation) : null, [investigation])
   const detail = investigation?.findings.find(finding => finding.id === selectedFinding)
   const excerpt = findSource(documents, selectedRef)
+  const cloudValidationError = cloudPayload ? validateApprovedCloudPayload(cloudPayload, documents) : null
 
   function chooseFiles(next: File[]) {
     if (busy) return
@@ -185,7 +186,7 @@ export default function InvestigationWorkspace() {
   }
 
   async function cloudReview() {
-    if (busy || !investigation || !firebaseConfigured || !cloudPayload || !sparkConfirmed || !payloadApproved || cloudAttempted) return
+    if (busy || !investigation || !firebaseConfigured || !cloudPayload || cloudValidationError || !sparkConfirmed || !payloadApproved || cloudAttempted) return
     const exactPayload = cloudPayload
     setCloudAttempted(true)
     setBusy('cloud')
@@ -379,12 +380,13 @@ export default function InvestigationWorkspace() {
             <textarea id="approved-cloud-payload" className="case-payload" value={cloudPayload} rows={12} maxLength={16000}
               onChange={event => { setCloudPayload(event.target.value); setPayloadApproved(false); setCloudStatus('Preview changed. Review and approve again before sending.') }}
               disabled={Boolean(busy) || cloudAttempted} spellCheck={false}/>
+            {cloudValidationError && <p className="case-error" role="alert">Cloud payload blocked: {cloudValidationError}</p>}
             <label className="case-checkbox"><input type="checkbox" checked={sparkConfirmed} disabled={Boolean(busy) || cloudAttempted}
               onChange={event => setSparkConfirmed(event.target.checked)}/> I verified Firebase Spark (free) and that no billing account is linked.</label>
             <label className="case-checkbox"><input type="checkbox" checked={payloadApproved} disabled={Boolean(busy) || cloudAttempted}
               onChange={event => setPayloadApproved(event.target.checked)}/> I reviewed every character above and explicitly approve sending only this text to Gemini Developer API.</label>
             <button className="primary-action" type="button"
-              disabled={Boolean(busy) || cloudAttempted || !firebaseConfigured || !sparkConfirmed || !payloadApproved || cloudPayload.length < 150}
+              disabled={Boolean(busy) || cloudAttempted || !firebaseConfigured || !sparkConfirmed || !payloadApproved || Boolean(cloudValidationError)}
               onClick={cloudReview}>{busy === 'cloud' ? 'Sending approved request…' : cloudAttempted ? 'Cloud request attempted (no automatic retry)' : 'Send this exact approved payload once'}</button>
           </>}
           {cloudStatus && <p className="case-status" role="status">{cloudStatus}</p>}

@@ -512,7 +512,7 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
     'Choose up to TWO useful option IDs for ONE cautious review. Do not write or change quotes or draw conclusions. ' +
     'Return ONLY compact JSON {"selectedIds":["E1","E2"],"privacyCandidates":[]}. ' +
     'The selectedIds must come from the OPTION IDs shown. Use [] if unsure. ' +
-    'At most TWO privacyCandidates, copied literally from an option; never guess.\n'
+    'At most TWO privacyCandidates containing clear personal or company identifiers ONLY; never choose quantities, dates, prices, shipment status or generic factual text. Copy candidates literally; if unsure return [].\n'
   const cited = new Set(findings.flatMap(finding => finding.refs))
   const relevance = (value: string, ref: string): number => {
     let score = cited.has(ref) ? 5 : 0
@@ -606,8 +606,8 @@ export function inspectLocalEvidenceSelection(
     ? 'Valid JSON; model selected no evidence or privacy candidates. Rule-based findings remain available.'
     : 'Model selected ' + object.selectedIds.length + ' option IDs; accepted ' + accepted +
       ' source-verified evidence group(s). Invalid IDs: ' + invalidChoices +
-      '. Literal privacy candidates: ' + privacyAccepted + '/' + privacySuggested +
-      '. Model-authored claims or rewritten quotations are never used.'
+      '. Recognized private identifiers: ' + privacyAccepted + '/' + privacySuggested +
+      ' suggested; unrecognized phrases are not automatically redacted. Model-authored claims or rewritten quotations are never used.'
   return { format: 'valid-json', proposed: object.selectedIds.length, accepted, invalidChoices,
     privacySuggested, privacyAccepted, summary }
 }

@@ -48,7 +48,7 @@ function addField(fields: Field[], docId: string, ref: string, label: string, ra
   const key = fieldKey(label)
   const value = trimValue(raw)
   if (!key || key.length > 42 || badField.test(key) || key === 'source' ||
-      !value || value.length > 60 || /\n/.test(value) || ignoredValues.test(value)) return
+      !value || value.length > 60 || /\n/.test(value) || /^(?:null|none|unknown|n\/a|unspecified)$/i.test(value)) return
   // Only compare short, explicit field values. Entire document paragraphs and
   // unstated contextual claims cannot be converted into exact field facts.
   if (value.split(/\s+/).length > 5) return

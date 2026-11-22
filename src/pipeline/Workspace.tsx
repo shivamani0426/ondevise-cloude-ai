@@ -165,8 +165,8 @@ export default function InvestigationWorkspace() {
       }
       const result = await analyzeWithLocalModel(plan.prompt, setModelDownload)
       setLocalRaw(result.text)
-      const diagnostics = inspectLocalEvidenceSelection(result.text, documents, plan.choices)
-      const grounded = validateLocalEvidenceSelection(result.text, documents, plan.choices)
+      const diagnostics = inspectLocalEvidenceSelection(result.text, documents, plan.choices, plan.focus)
+      const grounded = validateLocalEvidenceSelection(result.text, documents, plan.choices, plan.focus)
       const proposedPrivate = validatePrivacyCandidates(result.text, documents)
       setLocalSensitive(proposedPrivate)
       // Any earlier cloud preview was built without these newly approved local
@@ -394,7 +394,7 @@ export default function InvestigationWorkspace() {
 
         <div className="case-model-section">
           <h3>A. On-device Firebase AI Logic</h3>
-          <p>Uses Chrome's local model. To reduce CPU/GPU load, it receives up to six numbered, source-grounded quotation choices (maximum 2,400 prompt characters). The model returns choice IDs, not newly written quotations. PhantomGraph independently checks each ID and the original source text. The full rule-based investigation still examines all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no cloud fallback.</p>
+          <p>Uses Chrome's local model. To reduce CPU/GPU load, it receives up to six numbered, source-grounded quotation choices (maximum 2,400 prompt characters). The model returns choice IDs, not newly written quotations. PhantomGraph independently checks each ID and the original source text. For cases with a multi-source rule finding, the choices focus on its cited evidence; model selections still do not establish relevance or truth. The full rule-based investigation examines all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no cloud fallback.</p>
           <button className="outline-action" type="button" disabled={Boolean(busy) || !firebaseConfigured || !supportsChromeOnDevice() || localAttempted} onClick={localReview}>
             {busy === 'local' ? 'Local model analyzing…' : localAttempted ? 'Local review attempted' : 'Review case with on-device AI'}
           </button>

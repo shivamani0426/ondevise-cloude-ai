@@ -64,7 +64,15 @@ export type InferenceProbe = { source: 'ON_DEVICE' | 'IN_CLOUD'; text: string }
 export async function runDeviceProbe(onProgress: (fraction: number) => void): Promise<InferenceProbe> {
   if (!supportsChromeOnDevice()) throw new Error('On-device inference requires Chrome Desktop 139+ with the Prompt API enabled.')
   const ai = getAI(getFirebaseApp(), { backend: new GoogleAIBackend() })
-  const model = getGenerativeModel(ai, { mode: InferenceMode.ONLY_ON_DEVICE })
+  const model = getGenerativeModel(ai, {
+    mode: InferenceMode.ONLY_ON_DEVICE,
+    onDeviceParams: {
+      createOptions: {
+        expectedInputs: [{ type: 'text', languages: ['en'] }],
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+      },
+    },
+  })
   await model.initializeDeviceModel(onProgress)
   const result = await model.generateContent(PROBE_PROMPT)
   if (result.response.inferenceSource !== InferenceSource.ON_DEVICE) {

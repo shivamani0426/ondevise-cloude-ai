@@ -130,3 +130,70 @@ test('manual correction invalidates findings and updates quoted source before re
   await expect(page.getByText('Payment or verification charge mentioned', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Evidence graph and findings' })).toBeVisible()
 })
+
+
+function crc32(bytes: Buffer): number {
+  let result = 0xffffffff
+  for (const byte of bytes) {
+    result ^= byte
+    for (let j = 0; j < 8; j++) result = result & 1 ? (result >>> 1) ^ 0xedb88320 : result >>> 1
+  }
+  return (result ^ 0xffffffff) >>> 0
+}
+
+function makeDOCX(text: string): Buffer {
+  const xml = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const entries = [
+    ['[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+    ['_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+    ['word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>' + xml + '</w:t></w:r></w:p></w:body></w:document>'],
+  ]
+  const locals: Buffer[] = []
+  const centrals: Buffer[] = []
+  let offset = 0
+  for (const [name, value] of entries) {
+    const nameBytes = Buffer.from(name, 'utf8')
+    const body = Buffer.from(value, 'utf8')
+    const crc = crc32(body)
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt32LE(crc, 14)
+    local.writeUInt32LE(body.length, 18)
+    local.writeUInt32LE(body.length, 22)
+    local.writeUInt16LE(nameBytes.length, 26)
+    locals.push(local, nameBytes, body)
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(0x02014b50, 0)
+    central.writeUInt16LE(20, 4)
+    central.writeUInt16LE(20, 6)
+    central.writeUInt32LE(crc, 16)
+    central.writeUInt32LE(body.length, 20)
+    central.writeUInt32LE(body.length, 24)
+    central.writeUInt16LE(nameBytes.length, 28)
+    central.writeUInt32LE(offset, 42)
+    centrals.push(central, nameBytes)
+    offset += local.length + nameBytes.length + body.length
+  }
+  const central = Buffer.concat(centrals)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(entries.length, 8)
+  end.writeUInt16LE(entries.length, 10)
+  end.writeUInt32LE(central.length, 12)
+  end.writeUInt32LE(offset, 16)
+  return Buffer.concat([...locals, central, end])
+}
+
+test('real DOCX text is extracted in-browser with paragraph anchors', async ({ page }) => {
+  await openWorkspace(page)
+  await page.locator('#evidence-upload').setInputFiles({
+    name: 'terms.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    buffer: makeDOCX('This internship requires a verification fee before joining.'),
+  })
+  await page.getByRole('button', { name: 'Extract selected files locally' }).click()
+  await expect(page.getByText('Local extraction complete.', { exact: false })).toBeVisible({ timeout: 25000 })
+  await expect(page.locator('.case-excerpt blockquote')).toContainText('verification fee before joining')
+  await expect(page.locator('.case-excerpt')).toContainText('paragraph 1')
+})

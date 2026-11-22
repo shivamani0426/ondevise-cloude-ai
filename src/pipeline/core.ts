@@ -225,6 +225,55 @@ export function validateAIReview(raw: string, documents: EvidenceDocument[], ori
   return findings
 }
 
+export type AIReviewDiagnostics = {
+  format: 'invalid-json' | 'invalid-schema' | 'valid-json'
+  suggested: number
+  accepted: number
+  rejectedCitation: number
+  rejectedStructure: number
+  privacySuggested: number
+  privacyAccepted: number
+  summary: string
+}
+
+// Diagnostic classification uses counts ONLY. No original evidence or raw model
+// output is sent to logging, telemetry or external services.
+export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): AIReviewDiagnostics {
+  const base = { suggested: 0, accepted: 0, rejectedCitation: 0,
+    rejectedStructure: 0, privacySuggested: 0, privacyAccepted: 0 }
+  let parsed: unknown
+  try { parsed = JSON.parse(raw.trim().replace(/^\x60\x60\x60(?:json)?\\s*/i, '').replace(/\\s*\x60\x60\x60$/, '')) }
+  catch { return { ...base, format: 'invalid-json', summary: 'The local model returned non-JSON text. No AI findings were accepted.' } }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+      !('findings' in parsed) || !Array.isArray((parsed as {findings?: unknown}).findings)) {
+    return { ...base, format: 'invalid-schema', summary: 'The local response did not contain the expected findings array. No AI findings were accepted.' }
+  }
+  const object = parsed as { findings: unknown[]; privacyCandidates?: unknown }
+  const refs = new Set(documents.flatMap(doc => doc.segments.map(seg => sourceRef(doc, seg))))
+  let rejectedCitation = 0
+  let rejectedStructure = 0
+  const proposed = object.findings.slice(0, 6)
+  for (const finding of proposed) {
+    if (!finding || typeof finding !== 'object') { rejectedStructure++; continue }
+    const row = finding as {title?: unknown; detail?: unknown; refs?: unknown}
+    if (typeof row.title !== 'string' || row.title.trim().length < 6 ||
+        typeof row.detail !== 'string' || row.detail.trim().length < 12 ||
+        !Array.isArray(row.refs) || !row.refs.length ||
+        row.refs.some(v => typeof v !== 'string')) { rejectedStructure++; continue }
+    if (row.refs.some(v => !refs.has(v))) rejectedCitation++
+  }
+  const accepted = validateAIReview(raw, documents, 'on-device').length
+  const privacyAccepted = validatePrivacyCandidates(raw, documents).length
+  const privacySuggested = Array.isArray(object.privacyCandidates) ? object.privacyCandidates.length : 0
+  const summary = object.findings.length === 0 && privacySuggested === 0
+    ? 'Valid JSON, but the model proposed no findings or privacy candidates. The rule-based findings remain available.'
+    : 'Model proposed ' + object.findings.length + ' findings; accepted ' + accepted +
+      '. Invalid citations: ' + rejectedCitation + '; invalid fields: ' + rejectedStructure +
+      '. Privacy candidates: ' + privacyAccepted + '/' + privacySuggested + ' matched literal evidence.'
+  return { format: 'valid-json', suggested: object.findings.length, accepted,
+    rejectedCitation, rejectedStructure, privacySuggested, privacyAccepted, summary }
+}
+
 // AI privacy suggestions are accepted only if they match literal local evidence.
 // This validation never authorizes cloud use and never treats model output as proof.
 export function validatePrivacyCandidates(raw: string, documents: EvidenceDocument[]): string[] {

@@ -161,7 +161,14 @@ function linkedGroups(records: RecordData[]): LinkedGroup[] {
       // document contains exactly one distinct identifier value.
       const soleId = new Set(record.identifiers.map(item => item.value)).size === 1
       for (const field of record.fields) {
-        if (soleId || current.some(item => item.ref === field.ref)) fields.push(field)
+        const rowIdentities = unique(record.identifiers
+          .filter(item => item.ref === field.ref).map(item => item.value))
+        // If the same row/paragraph mentions several record identities,
+        // assigning its field to one of them would fabricate a link.
+        if (soleId || (rowIdentities.length === 1 &&
+          current.some(item => item.ref === field.ref && item.value === rowIdentities[0]))) {
+          fields.push(field)
+        }
       }
     }
     groups.push({ identifiers: compatible, fields })

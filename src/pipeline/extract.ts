@@ -131,7 +131,6 @@ async function readPDF(file: File): Promise<{ segments: SourceSegment[]; warning
   pdfjs.GlobalWorkerOptions.workerSrc = workerModule.default
   const loading = pdfjs.getDocument({
     data: bytes,
-    isEvalSupported: false,
     enableXfa: false,
     useSystemFonts: true,
   })
@@ -182,7 +181,7 @@ async function readPDF(file: File): Promise<{ segments: SourceSegment[]; warning
       if (ocrWorker) await ocrWorker.terminate()
     }
   } finally {
-    await pdf.destroy()
+    await loading.destroy()
   }
   return { segments, warnings }
 }

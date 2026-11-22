@@ -34,7 +34,7 @@ test('Case B: a 96-unit quantity can never be accepted as personal privacy data'
   const prepared=makeCloudPayload(docs,validatePrivacyCandidates(json(['96 units']),docs))
   assert.equal(prepared.redactions,0)
   assert.ok(prepared.payload.includes('96 units'))
-  assert.ok(prepared.payload.includes('"delivered_units"'))
+  assert.ok(JSON.parse(prepared.payload).redactedEvidence.some(entry => entry.excerpt.includes('"delivered_units"')))
   assert.doesNotMatch(prepared.payload,/LOCAL_AI_REDACTED/)
 })
 

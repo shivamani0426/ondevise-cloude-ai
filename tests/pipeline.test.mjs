@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   analyzeEvidence, buildGraph, makeCloudPayload, makeLocalPrompt, findSource, redactForCloud,
-  reportInvestigation, validateAIReview, validatePrivacyCandidates, redactWithSuggestions,
+  reportInvestigation, validateAIReview, validatePrivacyCandidates, redactWithSuggestions, validateApprovedCloudPayload,
 } from '../src/pipeline/core.ts'
 
 const documents = [
@@ -130,4 +130,16 @@ test('local PII candidates must be literal evidence strings; no phantom masking'
   const exportText = reportInvestigation(analyzeEvidence(documents), accepted)
   assert.doesNotMatch(exportText, /Northstar Labs|recruiter@example.com/)
   assert.equal(redactWithSuggestions('Northstar Labs', accepted).count, 1)
+})
+
+test('exact cloud JSON must be valid, redacted, known-source data after user edits', () => {
+  const draft = makeCloudPayload(documents)
+  assert.equal(validateApprovedCloudPayload(draft.payload, documents), null)
+  const altered = JSON.parse(draft.payload)
+  altered.redactedEvidence[0].excerpt += ' email leak abc@example.com'
+  assert.match(validateApprovedCloudPayload(JSON.stringify(altered), documents), /sensitive identifier/)
+  altered.redactedEvidence[0].excerpt = 'Safe paraphrase.'
+  altered.redactedEvidence[0].id = 'source-0:invented'
+  assert.match(validateApprovedCloudPayload(JSON.stringify(altered), documents), /real source ID/)
+  assert.match(validateApprovedCloudPayload(draft.payload + 'NOT_JSON', documents), /valid JSON/)
 })

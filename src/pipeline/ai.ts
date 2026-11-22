@@ -2,17 +2,21 @@ import { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode, InferenceSou
 import { CLOUD_MODEL, ensureAppCheckToken, getFirebaseApp, supportsChromeOnDevice } from '../firebase'
 
 // Firebase's on-device Prompt API can constrain generated JSON directly. A prompt
-// alone does not guarantee JSON, which made successful local inference look like
-// an analysis failure. This is a format constraint, NOT a trust or provenance check.
+// alone does not guarantee JSON. The nested quote contract constrains format,
+// not truth: independent literal quote validation is required before rendering.
 const localReviewSchema = Schema.object({
   properties: {
     findings: Schema.array({
       items: Schema.object({
         properties: {
-          title: Schema.string(),
-          detail: Schema.string(),
-          refs: Schema.array({ items: Schema.string() }),
-          nextStep: Schema.string(),
+          evidence: Schema.array({
+            items: Schema.object({
+              properties: {
+                ref: Schema.string(),
+                quote: Schema.string(),
+              },
+            }),
+          }),
         },
       }),
     }),

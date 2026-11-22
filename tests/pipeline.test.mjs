@@ -61,14 +61,20 @@ test('sensitive data protection recognizes ID patterns and passwords', () => {
   assert.doesNotMatch(result.text, /ABCDE1234F|1234 5678 9012|4111111111111111|helloworld/)
 })
 
-test('AI suggestions with fabricated citations are rejected rather than added to graph', () => {
-  const fake = JSON.stringify({ findings: [{ title: 'Certain criminal fraud', detail: 'This person is guilty of fraud', refs: ['source-0:invented'] }] })
+test('AI review requires independently matched literal quotations', () => {
+  const fake = JSON.stringify({findings:[{evidence:[{ref:'source-0:invented',quote:'No registration or verification fee is required.'}]}]})
   assert.deepEqual(validateAIReview(fake, documents, 'cloud'), [])
-  const real = JSON.stringify({ findings: [{ title: 'Fee statements need confirmation', detail: 'Document statements may be inconsistent; independently verify details.', refs: ['source-0:a-1', 'source-1:a-0'], nextStep: 'Verify with official issuer.' }] })
-  const findings = validateAIReview(real, documents, 'on-device')
+  const grounded = JSON.stringify({findings:[{evidence:[
+    {ref:'source-0:a-1',quote:'No registration or verification fee is required.'},
+    {ref:'source-1:a-0',quote:'registration verification fee today'},
+  ]}],privacyCandidates:[]})
+  const findings = validateAIReview(grounded, documents, 'on-device')
   assert.equal(findings.length, 1)
   assert.equal(findings[0].status, 'Unverified hypothesis')
-  assert.deepEqual(findings[0].refs, ['source-0:a-1', 'source-1:a-0'])
+  assert.deepEqual(findings[0].refs, ['source-0:a-1','source-1:a-0'])
+  assert.equal(findings[0].title, 'AI-selected source comparison')
+  assert.doesNotMatch(findings[0].detail, /required before joining/)
+  assert.equal(findings[0].quotes.length, 2)
 })
 
 test('non-JSON model output is never treated as evidence', () => {
@@ -144,20 +150,19 @@ test('exact cloud JSON must be valid, redacted, known-source data after user edi
   assert.match(validateApprovedCloudPayload(draft.payload + 'NOT_JSON', documents), /valid JSON/)
 })
 
-test('on-device review distinguishes malformed JSON, invalid citations and valid empty results', () => {
+test('on-device diagnostics distinguish unsupported quotes from source-ID errors', () => {
   const bad = inspectLocalReview('Not a JSON response', documents)
-  assert.equal(bad.format, 'invalid-json')
-  const empty = inspectLocalReview(JSON.stringify({ findings: [], privacyCandidates: [] }), documents)
-  assert.equal(empty.format, 'valid-json')
-  assert.match(empty.summary, /proposed no findings/)
-  const fake = inspectLocalReview(JSON.stringify({ findings: [{title:'Cross-source fee concern', detail:'Fee terms conflict and need review.', refs:['source-9:imaginary'], nextStep:'Verify source.'}], privacyCandidates:['invented name'] }), documents)
-  assert.equal(fake.rejectedCitation, 1)
-  assert.equal(fake.accepted, 0)
-  assert.equal(fake.privacyAccepted, 0)
-  const accepted = inspectLocalReview(JSON.stringify({ findings: [{title:'Cross-source fee concern', detail:'Fee terms conflict and need review.', refs:['source-0:a-1','source-1:a-0'], nextStep:'Verify official issuer.'}], privacyCandidates:['Northstar Labs'] }), documents)
-  assert.equal(accepted.accepted, 1)
-  assert.equal(accepted.privacyAccepted, 1)
-  assert.equal(accepted.rejectedCitation, 0)
+  assert.equal(bad.format,'invalid-json')
+  const empty = inspectLocalReview(JSON.stringify({findings:[],privacyCandidates:[]}),documents)
+  assert.equal(empty.format,'valid-json')
+  assert.match(empty.summary,/proposed no findings/)
+  const unknown = inspectLocalReview(JSON.stringify({findings:[{evidence:[{ref:'source-7:a-0',quote:'No registration or verification fee is required.'}]}]}),documents)
+  assert.equal(unknown.rejectedCitation,1)
+  const bogusQuote = inspectLocalReview(JSON.stringify({findings:[{evidence:[{ref:'source-0:a-1',quote:'The user has approved all future fees.'}]}]}),documents)
+  assert.equal(bogusQuote.rejectedGrounding,1)
+  const accepted = inspectLocalReview(JSON.stringify({findings:[{evidence:[{ref:'source-0:a-1',quote:'No registration or verification fee is required.'}]}],privacyCandidates:['Northstar Labs']}),documents)
+  assert.equal(accepted.accepted,1)
+  assert.equal(accepted.privacyAccepted,1)
 })
 
 test('compact local prompt is bounded and gives separate documents a chance', () => {
@@ -193,21 +198,24 @@ test('compact local prompt prioritizes risk-bearing excerpts over irrelevant boi
   const prompt = makeLocalPrompt(selected)
   assert.ok(prompt.indexOf('SOURCE source-0:a-1') < prompt.indexOf('SOURCE source-0:a-0'))
   assert.match(prompt, /at most ONE/)
-  assert.match(prompt, /If comparing two files, cite BOTH/)
+  assert.match(prompt, /COPY 1–2 verbatim quotes/)
 })
 
 
-test('contradiction from model needs source references on both sides', () => {
-  const undercited = JSON.stringify({findings:[{title:'Payment Fee Discrepancy',
-    detail:'The offer says no registration fees whereas the recruiter requests payment.',
-    refs:['source-1:a-0'], nextStep:'Contact issuer.'}], privacyCandidates: []})
-  assert.equal(validateAIReview(undercited, documents, 'on-device').length, 0)
-  const bad = inspectLocalReview(undercited, documents)
-  assert.equal(bad.rejectedCitation, 0)
-  assert.equal(bad.rejectedSupport, 1)
-  assert.match(bad.summary, /incomplete cross-source citations/)
-  const good = JSON.stringify({findings:[{title:'Payment Fee Discrepancy',
-    detail:'The offer says no registration fees whereas the recruiter requests payment.',
-    refs:['source-0:a-1','source-1:a-0'], nextStep:'Contact issuer.'}], privacyCandidates: []})
-  assert.equal(validateAIReview(good, documents, 'on-device').length, 1)
+test('model-authored false cross-document conclusion is never displayed as a fact', () => {
+  const hostile = JSON.stringify({findings:[{
+    title:'Offer requires payment',detail:'The offer requires a registration fee.',
+    refs:['source-0:a-1','source-1:a-0'],
+    nextStep:'Send payment right away.',
+    evidence:[{ref:'source-0:a-1',quote:'No registration or verification fee is required.'},
+      {ref:'source-1:a-0',quote:'registration verification fee today'}],
+  }]})
+  const findings = validateAIReview(hostile, documents, 'on-device')
+  assert.equal(findings.length,1)
+  assert.equal(findings[0].quotes.length,2)
+  assert.doesNotMatch(findings[0].title + findings[0].detail + findings[0].nextStep,
+    /Offer requires payment|offer requires a registration fee|Send payment right away/i)
+  const report = reportInvestigation({documents, entities:[], findings})
+  assert.doesNotMatch(report,/Offer requires payment|Send payment right away/)
+  assert.match(report,/No registration or verification fee is required/)
 })

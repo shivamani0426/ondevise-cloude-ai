@@ -1,3 +1,4 @@
+import { compareDocumentClaims } from './compare.ts'
 export type SourceSegment = { id: string; anchor: string; text: string }
 export type EvidenceDocument = {
   id: string
@@ -179,6 +180,13 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
     'A document mentions sensitive identifiers or credentials. The text alone does not establish that disclosure is being requested.',
     'Do not disclose OTPs, passwords or financial credentials. Verify the purpose and recipient of any identity-document request.',
     identifiers.map(hit => hit.ref))
+
+  // Review generalized cross-document claims without treating stages, revisions,
+  // unsigned amendments or inconsistent labels as proven contradictions.
+  for (const candidate of compareDocumentClaims(documents)) {
+    if (findings.length >= MAX_FINDINGS) break
+    findings.push(candidate)
+  }
 
   if (!findings.length) {
     const first = documents.find(doc => doc.segments.length)?.segments[0]

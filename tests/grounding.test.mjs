@@ -148,6 +148,6 @@ test('general document-selection prompt is compact and covers unrelated sources'
   assert.ok(prompt.length <= 2400)
   assert.match(prompt,/SOURCE source-0:a-0/)
   assert.match(prompt,/SOURCE source-5:a-0/)
-  assert.match(prompt,/verbatim quotes/)
+  assert.match(prompt,/selectedIds/)
   assert.doesNotMatch(prompt,/Northstar|recruitment|verification fee/i)
 })

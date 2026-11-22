@@ -7,9 +7,9 @@ export type EvidenceDocument = {
   segments: SourceSegment[]
   warnings: string[]
 }
-export type EntityKind = 'email' | 'domain' | 'amount' | 'phone' | 'reference'
+export type EntityKind = 'email' | 'domain' | 'amount' | 'phone' | 'reference' | 'date' | 'organization' | 'person' | 'payment' | 'obligation'
 export type CaseEntity = { id: string; kind: EntityKind; label: string; refs: string[] }
-export type FindingStatus = 'Cross-source inconsistency' | 'Review recommended' | 'Unverified'
+export type FindingStatus = 'Corroborated conflict' | 'Possible concern' | 'Unverified hypothesis' | 'Insufficient evidence'
 export type CaseFinding = {
   id: string
   title: string
@@ -49,6 +49,11 @@ const patterns: { kind: EntityKind; re: RegExp }[] = [
   { kind: 'amount', re: /(?:₹|Rs\.?\s*|INR\s*|USD\s*|\$)\s?\d[\d,]*(?:\.\d{1,2})?/gi },
   { kind: 'phone', re: /(?<!\d)(?:\+91[-\s]?)?[6-9]\d{9}(?!\d)/g },
   { kind: 'reference', re: /\b(?:invoice|reference|application|order)\s*(?:id|no\.?|number|#|:)\s*[A-Z0-9-]{4,24}\b/gi },
+  { kind: 'date', re: /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+20\d{2})\b/gi },
+  { kind: 'organization', re: /\b(?:[A-Z][a-zA-Z]+\s+){0,3}(?:Labs|Technologies|Solutions|Services|Consulting|Enterprises|Corporation|Limited|LLP|Private Limited)\b/g },
+  { kind: 'person', re: /\b(?:Mr\.?|Ms\.?|Mrs\.?|Dr\.?|Contact:)\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b/g },
+  { kind: 'payment', re: /\b[A-Z]{4}0[A-Z0-9]{6}\b|\b[\w.-]+@(?:ybl|ibl|upi|oksbi|okaxis|okhdfcbank|paytm)\b/gi },
+  { kind: 'obligation', re: /\b(?:must|shall|required to|expected to|obligated to)\s+[^.!?\n]{8,110}/gi },
 ]
 
 function extractEntities(documents: EvidenceDocument[]): CaseEntity[] {
@@ -101,20 +106,20 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
   const fees = scan(documents, /\b(?:registration|verification|processing|onboarding|application|security|refundable|advance)\b.{0,90}\b(?:fee|charge|deposit|payment|pay)\b|\b(?:pay|payment)\b.{0,80}\b(?:before joining|upfront|registration|verification|deposit)\b/i)
   const noFee = scan(documents, /\b(?:no|without|never|not required to pay)\b.{0,65}\b(?:fee|charge|payment|deposit)\b/i)
   if (fees.length) addFinding(findings,
-    'Payment or verification charge mentioned', 'Review recommended',
+    'Payment or verification charge mentioned', 'Possible concern',
     'One or more excerpts contain language about an advance, registration, verification, or processing payment. This alone does not establish fraud.',
     'Confirm the payment policy using an independently verified official contact. Do not pay based only on document instructions.',
     fees.map(hit => hit.ref))
   const conflicts = fees.flatMap(fee => noFee.filter(negative => negative.sourceId !== fee.sourceId).map(negative => [fee.ref, negative.ref]))
   if (conflicts.length) addFinding(findings,
-    'Conflicting fee statements across sources', 'Cross-source inconsistency',
+    'Conflicting fee statements across sources', 'Corroborated conflict',
     'A source discusses a charge while a different source appears to deny a fee. The statements may refer to different conditions and require manual review.',
     'Check the exact excerpts, dates and contractual context. Request a written clarification through a verified channel.',
     conflicts.flat())
 
   const urgency = scan(documents, /\b(?:pay today|complete today|immediately|within 24 hours|urgent(?:ly)?|final reminder|limited time|act now|last chance)\b/i)
   if (urgency.length) addFinding(findings,
-    'Time-pressure language', 'Review recommended',
+    'Time-pressure language', 'Possible concern',
     'At least one source contains urgency language. This is a review cue, not proof of deceptive intent.',
     'Avoid acting under pressure until independently verifying the request and its deadline.',
     urgency.map(hit => hit.ref))
@@ -122,7 +127,7 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
   const domains = entities.filter(entity => entity.kind === 'domain')
   const distinct = unique(domains.map(entity => entity.label.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '')))
   if (distinct.length > 1) addFinding(findings,
-    'Multiple domains appear in evidence', 'Review recommended',
+    'Multiple domains appear in evidence', 'Possible concern',
     'The documents reference different website domains. Different domains can be legitimate, so ownership and purpose need independent verification.',
     'Compare each domain with the organization’s independently confirmed official website. Do not follow payment links until verified.',
     domains.flatMap(entity => entity.refs))
@@ -132,15 +137,43 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
   if (amounts.length > 1 && compensation.length > 1) {
     const salaryRefs = unique(compensation.map(hit => hit.ref))
     if (salaryRefs.length > 1) addFinding(findings,
-      'Compensation amounts need comparison', 'Review recommended',
+      'Compensation amounts need comparison', 'Possible concern',
       'Multiple monetary amounts and compensation references appear. They are not automatically contradictions because currencies, periods and payment purposes can differ.',
       'Compare salary, reimbursements and fees manually with the relevant source clauses.',
       salaryRefs)
   }
 
+  // Compare explicit salary/stipend figures only when the monetary amount occurs
+  // in the same excerpt as a compensation term. A fee is never misclassified as salary.
+  const salaryClaims = compensation.flatMap(hit => {
+    const match = hit.text.match(/(?:₹|Rs\.?\s*|INR\s*|\$|USD\s*)\s?\d[\d,]*/i)
+    return match ? [{ ref: hit.ref, sourceId: hit.sourceId, value: match[0].replace(/\s+/g, '').toLowerCase() }] : []
+  })
+  const salaryDifferences = salaryClaims.filter(a => salaryClaims.some(b => a.sourceId !== b.sourceId && a.value !== b.value))
+  if (salaryDifferences.length > 1) addFinding(findings,
+    'Different compensation figures across sources', 'Corroborated conflict',
+    'Separate source excerpts associate different amounts with compensation. Periods, currencies and benefit types must be checked before calling this a contradiction.',
+    'Compare the exact salary or stipend clauses and their dates with the issuer.',
+    salaryDifferences.map(hit => hit.ref))
+
+  const dateRe = /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]20\d{2})\b/g
+  const startDates = scan(documents, /\b(?:joining date|start date|start on|joining on|commenc(?:e|es|ing) on)\b/i)
+    .flatMap(hit => [...hit.text.matchAll(dateRe)].map(match => ({ ...hit, date: match[0] })))
+  const conflictingDates = startDates.filter(a => startDates.some(b => a.sourceId !== b.sourceId && a.date !== b.date))
+  if (conflictingDates.length > 1) addFinding(findings,
+    'Different start or joining dates', 'Corroborated conflict',
+    'Separate sources name different start or joining dates. Date formatting and updates can explain differences, so inspect their context.',
+    'Confirm the latest applicable joining date with an independently verified issuer.',
+    conflictingDates.map(hit => hit.ref))
+  else if (startDates.length > 1) addFinding(findings,
+    'Joining timeline requires verification', 'Possible concern',
+    'Multiple sources specify a start or joining date. Check whether dates and later changes agree.',
+    'Compare the exact dated statements and request written confirmation.',
+    startDates.map(hit => hit.ref))
+
   const identifiers = scan(documents, /\b(?:aadhaar|pan card|passport|otp|one.time password|bank account|cvv|password|credit card)\b/i)
   if (identifiers.length) addFinding(findings,
-    'Sensitive identifier request or mention', 'Review recommended',
+    'Sensitive identifier request or mention', 'Possible concern',
     'A document mentions sensitive identifiers or credentials. The text alone does not establish that disclosure is being requested.',
     'Do not disclose OTPs, passwords or financial credentials. Verify the purpose and recipient of any identity-document request.',
     identifiers.map(hit => hit.ref))
@@ -149,7 +182,7 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
     const first = documents.find(doc => doc.segments.length)?.segments[0]
     const document = documents.find(doc => doc.segments.length)
     if (first && document) addFinding(findings,
-      'No rule-matched concern found', 'Unverified',
+      'No rule-matched concern found', 'Insufficient evidence',
       'No predefined risk cues matched the extracted text. This is not a clean bill of health; extraction and heuristic analysis can miss problems.',
       'Read all original sources and verify material claims independently.',
       [sourceRef(document, first)])
@@ -184,7 +217,7 @@ export function validateAIReview(raw: string, documents: EvidenceDocument[], ori
       title: limit(title, 120),
       detail: limit(detail, 700),
       refs: refs.slice(0, 8),
-      status: 'Unverified',
+      status: 'Unverified hypothesis',
       nextStep: typeof row.nextStep === 'string' && row.nextStep.trim() ? limit(row.nextStep.trim(), 300) : 'Confirm this interpretation against the cited source excerpt.',
       origin,
     })

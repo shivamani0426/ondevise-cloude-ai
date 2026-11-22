@@ -12,7 +12,7 @@ const config = {
 }
 const siteKey = import.meta.env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || ''
 const PROBE_PROMPT = 'This is a fictional connection test, not an investigation. Reply with exactly: PHANTOMGRAPH_PROBE_OK'
-const CLOUD_MODEL = 'gemini-3.5-flash-lite'
+export const CLOUD_MODEL = 'gemini-3.5-flash-lite'
 
 export const firebaseConfigured = Boolean(
   config.apiKey && config.authDomain && config.projectId && config.appId && siteKey
@@ -21,7 +21,7 @@ export const firebaseConfigured = Boolean(
 let instance: FirebaseApp | null = null
 let appCheckInstance: AppCheck | null = null
 
-function getFirebaseApp(): FirebaseApp {
+export function getFirebaseApp(): FirebaseApp {
   if (!firebaseConfigured) throw new Error('Firebase web configuration is missing.')
   instance = instance || (getApps().length ? getApp() : initializeApp(config))
   return instance
@@ -29,7 +29,7 @@ function getFirebaseApp(): FirebaseApp {
 
 // Reuse one App Check instance. Calling initializeAppCheck repeatedly with a
 // new provider object may trigger an already-initialized error.
-async function ensureAppCheckToken(): Promise<void> {
+export async function ensureAppCheckToken(): Promise<void> {
   const app = getFirebaseApp()
   appCheckInstance = appCheckInstance || initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider(siteKey),

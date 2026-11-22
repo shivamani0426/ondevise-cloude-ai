@@ -159,3 +159,39 @@ test('on-device review distinguishes malformed JSON, invalid citations and valid
   assert.equal(accepted.privacyAccepted, 1)
   assert.equal(accepted.rejectedCitation, 0)
 })
+
+test('compact local prompt is bounded and gives separate documents a chance', () => {
+  const many = Array.from({ length: 6 }, (_, i) => ({
+    id: 'source-' + i,
+    name: 'source-' + i + '.txt',
+    format: 'TXT',
+    size: 200,
+    warnings: [],
+    segments: Array.from({ length: 12 }, (_, j) => ({
+      id: 'a-' + j,
+      anchor: 'line ' + j,
+      text: 'Joining date and verification fee INR 2,499 today. Domain northstar.example. ' + 'repeated text '.repeat(60),
+    })),
+  }))
+  const prompt = makeLocalPrompt(many)
+  assert.ok(prompt.length <= 2400, 'Prompt exceeded compact local limit')
+  assert.ok(prompt.length < 2400, 'Prompt should leave room for structured output')
+  assert.match(prompt, /SOURCE source-0:a-0/)
+  assert.match(prompt, /SOURCE source-5:a-0/)
+  assert.doesNotMatch(prompt, /SOURCE source-0:a-3/)
+  assert.equal(prompt, makeLocalPrompt(many), 'Excerpt sampling must be deterministic')
+})
+
+test('compact local prompt prioritizes risk-bearing excerpts over irrelevant boilerplate', () => {
+  const selected = [{
+    id: 'source-0', name: 'offer.txt', format: 'TXT', size: 150, warnings: [],
+    segments: [
+      { id: 'a-0', anchor: 'line 1', text: 'General company introduction and copyright notice.' },
+      { id: 'a-1', anchor: 'line 2', text: 'Verification fee INR 2,499 is due today before joining.' },
+    ],
+  }]
+  const prompt = makeLocalPrompt(selected)
+  assert.ok(prompt.indexOf('SOURCE source-0:a-1') < prompt.indexOf('SOURCE source-0:a-0'))
+  assert.match(prompt, /at most ONE/)
+  assert.match(prompt, /If comparing two files, cite BOTH/)
+})

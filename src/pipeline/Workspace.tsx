@@ -212,8 +212,8 @@ export default function InvestigationWorkspace() {
       setInvestigation(previous => previous ? { ...previous, findings: [
         ...previous.findings.filter(finding => finding.origin !== 'cloud'), ...grounded,
       ] } : previous)
-      setCloudStatus('Verified ' + result.source + '. ' + grounded.length + ' source-grounded cloud hypotheses accepted. ' +
-        (grounded.length ? 'Review every citation.' : 'Model output did not contain safely verifiable cited findings.'))
+      setCloudStatus('Verified ' + result.source + '. ' + grounded.length + ' verbatim-source-quote selections accepted. ' +
+        (grounded.length ? 'Inspect the quoted evidence; the AI has not established whether claims are true.' : 'The model response lacked exact source quotations and was not added to findings.'))
     } catch (reason) {
       setCloudStatus('Cloud review failed or was rejected: ' + describeError(reason) + '. No automatic retry or fallback.')
     } finally {
@@ -317,7 +317,7 @@ export default function InvestigationWorkspace() {
 
       {investigation && <section className="case-panel" aria-labelledby="findings-title">
         <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} entities · {investigation.findings.length} findings</span></div>
-        <p>These are evidence-linked review cues, not certified fraud judgments. AI suggestions, when present, are explicitly labelled unverified.</p>
+        <p>Rule-based findings are review cues, not certified fraud judgments. AI can only select literal passages found in your sources; it cannot create accepted factual summaries. Source authenticity and meaning still require human review.</p>
 
         {graph && <div className="case-graph-map" aria-label="Interactive evidence graph">
           <svg className="case-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -357,6 +357,21 @@ export default function InvestigationWorkspace() {
           <p className="eyebrow">SELECTED FINDING · {detail.status.toUpperCase()}</p>
           <h3>{detail.title}</h3>
           <p>{detail.detail}</p>
+          {detail.quotes && <div className="case-verified-quotes">
+            <strong>Literal text verified against extracted evidence</strong>
+            {detail.quotes.map((item, index) => {
+              const resolved = findSource(documents, item.ref)
+              return <figure key={item.ref + '-' + index} className="case-evidence-quote">
+                <blockquote>{item.quote}</blockquote>
+                <figcaption>
+                  <button type="button" className="inline-link" onClick={() => setSelectedRef(item.ref)}>
+                    {resolved ? resolved.document.name + ' · ' + resolved.segment.anchor : item.ref}
+                  </button>
+                </figcaption>
+              </figure>
+            })}
+            <p className="case-caution">Verbatim quotation matching confirms that the extracted text contains the phrase—not that the original document is authentic or that a model's interpretation is correct.</p>
+          </div>}
           <strong>Verification step</strong><p>{detail.nextStep}</p>
           <strong>Source citations</strong>
           <div className="case-citations">{detail.refs.map(ref => {
@@ -371,11 +386,11 @@ export default function InvestigationWorkspace() {
 
       {investigation && <section className="case-panel" aria-labelledby="ai-review-title">
         <div className="case-panel-top"><h2 id="ai-review-title">4. Optional hybrid AI review</h2><span className="case-tag">Explicit actions only</span></div>
-        <p>Both inference routes were separately verified with fictional connectivity probes. Case analysis has its own limitations; AI proposals are added only if their citations match extracted source anchors.</p>
+        <p>Both inference routes passed earlier fictional connectivity probes. This case review now accepts only AI-selected quotations that match actual source text. It does not certify interpretations or authenticity.</p>
 
         <div className="case-model-section">
           <h3>A. On-device Firebase AI Logic</h3>
-          <p>Uses Chrome's local model. To reduce CPU/GPU load, this optional review examines up to six high-relevance excerpts (maximum 2,400 prompt characters), not the whole case. The full rule-based graph still uses all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no fallback. AI findings with invalid citations are rejected.</p>
+          <p>Uses Chrome's local model. To reduce CPU/GPU load, this optional review examines up to six high-relevance excerpts (maximum 2,400 prompt characters), not the whole case. The full rule-based graph still uses all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no fallback. AI selections lacking an exact source quotation are rejected.</p>
           <button className="outline-action" type="button" disabled={Boolean(busy) || !firebaseConfigured || !supportsChromeOnDevice() || localAttempted} onClick={localReview}>
             {busy === 'local' ? 'Local model analyzing…' : localAttempted ? 'Local review attempted' : 'Review case with on-device AI'}
           </button>

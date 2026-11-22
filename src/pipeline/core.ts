@@ -1,4 +1,4 @@
-import { compareDocumentClaims } from './compare'
+import { compareDocumentClaims } from './compare.ts'
 export type SourceSegment = { id: string; anchor: string; text: string }
 export type EvidenceDocument = {
   id: string

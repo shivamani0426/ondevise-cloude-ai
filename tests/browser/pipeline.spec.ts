@@ -248,3 +248,29 @@ test('hostile source text stays inert and cannot initiate cloud or exfiltration 
   await expect(page.getByRole('button', { name: 'Send this exact approved payload once' })).toBeDisabled()
   expect(outgoing).toEqual([])
 })
+
+
+test('generic invoice matching is visible in the real local evidence graph and never calls cloud', async ({ page }) => {
+  const outgoing: string[] = []
+  page.on('request', request => {
+    if (/firebasevertexai|generativelanguage|attacker\.example/i.test(request.url())) outgoing.push(request.url())
+  })
+  await openWorkspace(page)
+  const first = txt('anonymous-contract.txt', 'Invoice ID: INV-2027-0042\namount_usd: 350\nstatus: issued')
+  const second = { name:'anonymous-ledger.csv', mimeType:'text/csv',
+    buffer:Buffer.from('invoice_id,amount_usd,status\nINV-2027-0042,450,issued') }
+  await page.locator('#evidence-upload').setInputFiles([first,second])
+  await page.getByRole('button', {name:'Extract selected files locally'}).click()
+  await expect(page.getByText('Local extraction complete.',{exact:false})).toBeVisible()
+  await page.getByRole('button', {name:'Build evidence graph and findings'}).click()
+  await expect(page.getByRole('heading',{name:'Evidence graph and findings'})).toBeVisible()
+  await page.locator('.case-findings .case-finding').filter({
+    hasText:'Same reference, different recorded field values',
+  }).click()
+  await expect(page.locator('.case-detail h3')).toHaveText('Same reference, different recorded field values')
+  await expect(page.locator('.case-detail')).toContainText('amount usd')
+  await expect(page.locator('.case-citations .inline-link')).toHaveCount(3)
+  await page.getByRole('button',{name:'Prepare locally redacted cloud preview'}).click()
+  await expect(page.getByRole('button',{name:'Send this exact approved payload once'})).toBeDisabled()
+  expect(outgoing).toEqual([])
+})

@@ -49,7 +49,7 @@ const patterns: { kind: EntityKind; re: RegExp }[] = [
   { kind: 'amount', re: /(?:₹|Rs\.?\s*|INR\s*|USD\s*|\$)\s?\d[\d,]*(?:\.\d{1,2})?/gi },
   { kind: 'phone', re: /(?<!\d)(?:\+91[-\s]?)?[6-9]\d{9}(?!\d)/g },
   { kind: 'reference', re: /\b(?:invoice|reference|application|order)\s*(?:id|no\.?|number|#|:)\s*[A-Z0-9-]{4,24}\b/gi },
-  { kind: 'date', re: /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+20\d{2})\b/gi },
+  { kind: 'date', re: /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+20\d{2})\b/gi },
   { kind: 'organization', re: /\b(?:[A-Z][a-zA-Z]+\s+){0,3}(?:Labs|Technologies|Solutions|Services|Consulting|Enterprises|Corporation|Limited|LLP|Private Limited)\b/g },
   { kind: 'person', re: /\b(?:Mr\.?|Ms\.?|Mrs\.?|Dr\.?|Contact:)\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b/g },
   { kind: 'payment', re: /\b[A-Z]{4}0[A-Z0-9]{6}\b|\b[\w.-]+@(?:ybl|ibl|upi|oksbi|okaxis|okhdfcbank|paytm)\b/gi },
@@ -156,7 +156,7 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
     'Compare the exact salary or stipend clauses and their dates with the issuer.',
     salaryDifferences.map(hit => hit.ref))
 
-  const dateRe = /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]20\d{2})\b/g
+  const dateRe = /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})\b/g
   const startDates = scan(documents, /\b(?:joining date|start date|start on|joining on|commenc(?:e|es|ing) on)\b/i)
     .flatMap(hit => [...hit.text.matchAll(dateRe)].map(match => ({ ...hit, date: match[0] })))
   const conflictingDates = startDates.filter(a => startDates.some(b => a.sourceId !== b.sourceId && a.date !== b.date))

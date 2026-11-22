@@ -303,6 +303,6 @@ test('Pipeline 7: unrelated status updates are explained without a false fraud v
   await expect(detail).toContainText('UNVERIFIED HYPOTHESIS')
   await detail.locator('.case-explanation summary').click()
   await expect(detail.locator('.case-explanation')).toContainText('status that may change over time')
-  await expect(detail.locator('.case-citations .inline-link')).toHaveCount(2)
+  await expect(detail.locator('.case-citations .inline-link')).toHaveCount(4)
   expect(sent).toEqual([])
 })

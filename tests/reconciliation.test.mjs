@@ -30,6 +30,10 @@ test('unrelated service agreement, unsigned change, and invoice yield cautious t
   const findings=compareDocumentClaims(sources)
   assert.ok(findings.some(f=>/cancellation or refund windows/.test(f.title)))
   assert.ok(findings.some(f=>/activation or effective dates/.test(f.title)))
+  const activation=findings.find(f=>/activation or effective dates/.test(f.title))
+  assert.deepEqual([...activation.refs].sort(), ['source-0:a-1','source-1:a-2'])
+  assert.ok(!activation.refs.includes('source-2:a-1'),
+    'Invoice activation fee due_date must not be cited as a service activation date')
   assert.ok(findings.some(f=>/Fee policy and billing/.test(f.title)))
   assert.ok(findings.some(f=>/Approval or signature/.test(f.title)))
   const fee=findings.find(f=>/Fee policy and billing/.test(f.title))
@@ -126,4 +130,54 @@ test('file name alone never influences the inferred claim or accusation',()=>{
   const findings=compareDocumentClaims(sources)
   assert.ok(findings.length>0)
   assert.doesNotMatch(JSON.stringify(findings),/URGENT-FRAUD|VERIFIED-INSTRUCTIONS/)
+})
+
+
+test('activation-fee line and due-date CSV do not invent activation date comparisons',()=>{
+  const sources=[
+    doc(0,'PDF',['The service activates on 2027-04-12.']),
+    doc(1,'CSV',[
+      'entry,description,amount_usd,due_date,invoice_status',
+      'B-101,activation fee,80,2027-04-08,unpaid',
+      'B-102,monthly service,320,2027-04-20,scheduled',
+    ]),
+  ]
+  assert.ok(!compareDocumentClaims(sources)
+    .some(f=>/activation or effective dates/.test(f.title)))
+})
+
+test('different real activation dates still compare despite an unrelated billing row',()=>{
+  const sources=[
+    doc(0,'DOCX',['The service activates on 2027-04-12.']),
+    doc(1,'TXT',['The activation date is 2027-04-20.']),
+    doc(2,'CSV',['description,amount,due_date','activation fee,80,2027-04-08']),
+  ]
+  const finding=compareDocumentClaims(sources)
+    .find(f=>/activation or effective dates/.test(f.title))
+  assert.ok(finding)
+  assert.deepEqual([...finding.refs].sort(),['source-0:a-0','source-1:a-0'])
+})
+
+test('typed effective date fields compare across JSON, text and OCR-style source text',()=>{
+  const sources=[
+    doc(0,'JSON',['"effective_date": "2027-05-01",','"invoice_due_date": "2027-04-03"']),
+    doc(1,'TXT',['Commencement date = 2027-06-01.']),
+  ]
+  const finding=compareDocumentClaims(sources)
+    .find(f=>/activation or effective dates/.test(f.title))
+  assert.ok(finding)
+  assert.deepEqual([...finding.refs].sort(), ['source-0:a-0','source-1:a-0'])
+})
+
+test('dates following a fee label are not inferred from arbitrary nearby text',()=>{
+  const sources=[
+    doc(0,'PDF',['Service activates on 2027-03-10.']),
+    doc(1,'TXT',[
+      'The activation fee costs USD 80, payable by 2027-03-01.',
+      'The invoice for activation fee has deadline 2027-03-07.',
+      'Receipt for activation fee: amount=80; payment_date=2027-03-08.',
+    ]),
+  ]
+  assert.ok(!compareDocumentClaims(sources)
+    .some(f=>/activation or effective dates/.test(f.title)))
 })

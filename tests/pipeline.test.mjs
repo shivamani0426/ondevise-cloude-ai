@@ -195,3 +195,19 @@ test('compact local prompt prioritizes risk-bearing excerpts over irrelevant boi
   assert.match(prompt, /at most ONE/)
   assert.match(prompt, /If comparing two files, cite BOTH/)
 })
+
+
+test('contradiction from model needs source references on both sides', () => {
+  const undercited = JSON.stringify({findings:[{title:'Payment Fee Discrepancy',
+    detail:'The offer says no registration fees whereas the recruiter requests payment.',
+    refs:['source-1:a-0'], nextStep:'Contact issuer.'}], privacyCandidates: []})
+  assert.equal(validateAIReview(undercited, documents, 'on-device').length, 0)
+  const bad = inspectLocalReview(undercited, documents)
+  assert.equal(bad.rejectedCitation, 0)
+  assert.equal(bad.rejectedSupport, 1)
+  assert.match(bad.summary, /incomplete cross-source citations/)
+  const good = JSON.stringify({findings:[{title:'Payment Fee Discrepancy',
+    detail:'The offer says no registration fees whereas the recruiter requests payment.',
+    refs:['source-0:a-1','source-1:a-0'], nextStep:'Contact issuer.'}], privacyCandidates: []})
+  assert.equal(validateAIReview(good, documents, 'on-device').length, 1)
+})

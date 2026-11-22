@@ -190,6 +190,17 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
   return { documents, entities, findings }
 }
 
+// Cross-document comparisons must cite evidence from both sides. A fabricated
+// or missing citation cannot be silently supplied by the application.
+export function needsCrossSourceEvidence(title: string, detail: string): boolean {
+  return /\b(?:discrepanc(?:y|ies)|contradiction(?:s)?|conflict(?:s|ing)?|inconsisten(?:t|cy|cies)|mismatch(?:es)?|different (?:amounts|dates|figures|terms|statements)|compared (?:to|with)|whereas)\b/i.test(title + ' ' + detail)
+}
+
+export function hasRequiredSourceCoverage(title: string, detail: string, refs: string[]): boolean {
+  if (!needsCrossSourceEvidence(title, detail)) return true
+  return new Set(refs.map(ref => ref.split(':')[0])).size >= 2
+}
+
 export function validateAIReview(raw: string, documents: EvidenceDocument[], origin: 'on-device' | 'cloud'): CaseFinding[] {
   const allRefs = new Set(documents.flatMap(doc => doc.segments.map(segment => sourceRef(doc, segment))))
   let parsed: unknown
@@ -211,7 +222,7 @@ export function validateAIReview(raw: string, documents: EvidenceDocument[], ori
     if (!refs.length || refs.some(ref => !allRefs.has(ref))) continue
     const title = row.title.trim()
     const detail = row.detail.trim()
-    if (title.length < 6 || detail.length < 12) continue
+    if (title.length < 6 || detail.length < 12 || !hasRequiredSourceCoverage(title, detail, refs)) continue
     findings.push({
       id: origin + '-finding-' + findings.length,
       title: limit(title, 120),
@@ -231,6 +242,7 @@ export type AIReviewDiagnostics = {
   accepted: number
   rejectedCitation: number
   rejectedStructure: number
+  rejectedSupport: number
   privacySuggested: number
   privacyAccepted: number
   summary: string
@@ -240,7 +252,7 @@ export type AIReviewDiagnostics = {
 // output is sent to logging, telemetry or external services.
 export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): AIReviewDiagnostics {
   const base = { suggested: 0, accepted: 0, rejectedCitation: 0,
-    rejectedStructure: 0, privacySuggested: 0, privacyAccepted: 0 }
+    rejectedStructure: 0, rejectedSupport: 0, privacySuggested: 0, privacyAccepted: 0 }
   let parsed: unknown
   try { parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')) }
   catch { return { ...base, format: 'invalid-json', summary: 'The local model returned non-JSON text. No AI findings were accepted.' } }
@@ -252,6 +264,7 @@ export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): 
   const refs = new Set(documents.flatMap(doc => doc.segments.map(seg => sourceRef(doc, seg))))
   let rejectedCitation = 0
   let rejectedStructure = 0
+  let rejectedSupport = 0
   const proposed = object.findings.slice(0, 6)
   for (const finding of proposed) {
     if (!finding || typeof finding !== 'object') { rejectedStructure++; continue }
@@ -261,6 +274,7 @@ export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): 
         !Array.isArray(row.refs) || !row.refs.length ||
         row.refs.some(v => typeof v !== 'string')) { rejectedStructure++; continue }
     if (row.refs.some(v => !refs.has(v))) rejectedCitation++
+    else if (!hasRequiredSourceCoverage(row.title, row.detail, row.refs as string[])) rejectedSupport++
   }
   const accepted = validateAIReview(raw, documents, 'on-device').length
   const privacyAccepted = validatePrivacyCandidates(raw, documents).length
@@ -268,10 +282,10 @@ export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): 
   const summary = object.findings.length === 0 && privacySuggested === 0
     ? 'Valid JSON, but the model proposed no findings or privacy candidates. The rule-based findings remain available.'
     : 'Model proposed ' + object.findings.length + ' findings; accepted ' + accepted +
-      '. Invalid citations: ' + rejectedCitation + '; invalid fields: ' + rejectedStructure +
+      '. Unknown citations: ' + rejectedCitation + '; incomplete cross-source citations: ' + rejectedSupport + '; invalid fields: ' + rejectedStructure +
       '. Privacy candidates: ' + privacyAccepted + '/' + privacySuggested + ' matched literal evidence.'
   return { format: 'valid-json', suggested: object.findings.length, accepted,
-    rejectedCitation, rejectedStructure, privacySuggested, privacyAccepted, summary }
+    rejectedCitation, rejectedStructure, rejectedSupport, privacySuggested, privacyAccepted, summary }
 }
 
 // AI privacy suggestions are accepted only if they match literal local evidence.

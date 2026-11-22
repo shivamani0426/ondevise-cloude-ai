@@ -215,7 +215,7 @@ export default function InvestigationWorkspace() {
       setCloudStatus('Verified ' + result.source + '. ' + grounded.length + ' verbatim-source-quote selections accepted. ' +
         (grounded.length ? 'Inspect the quoted evidence; the AI has not established whether claims are true.' : 'The model response lacked exact source quotations and was not added to findings.'))
     } catch (reason) {
-      setCloudStatus('Cloud review failed or was rejected: ' + describeError(reason) + '. No automatic retry or fallback.')
+      setCloudStatus('Cloud review failed or was rejected: ' + (/free tier is not available/i.test(describeError(reason)) ? 'Gemini free-tier access is restricted for this project (403). Keep using the on-device and rule-based analysis; do not enable billing to bypass this restriction.' : describeError(reason)) + '. No automatic retry or fallback.')
     } finally {
       setBusy(null)
     }
@@ -317,7 +317,7 @@ export default function InvestigationWorkspace() {
 
       {investigation && <section className="case-panel" aria-labelledby="findings-title">
         <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} entities · {investigation.findings.length} findings</span></div>
-        <p>Rule-based findings are review cues, not certified fraud judgments. AI can only select literal passages found in your sources; it cannot create accepted factual summaries. Source authenticity and meaning still require human review.</p>
+        <p>Rule-based findings include cautious comparisons of quantities, dates, fees and terms across sources. Different shipment stages or unsigned revisions are NOT proof of loss, fraud or legal effect. AI can only select literal quotations from extracted sources; all findings still require human review.</p>
 
         {graph && <div className="case-graph-map" aria-label="Interactive evidence graph">
           <svg className="case-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">

@@ -284,7 +284,7 @@ test('generic invoice matching is visible in the real local evidence graph and n
 
 
 test('Pipeline 7: unrelated status updates are explained without a false fraud verdict or cloud request',async ({page})=>{
-  const sent=[]
+  const sent: string[] = []
   page.on('request',request=>{
     if (/firebasevertexai|generativelanguage|attacker\.example/i.test(request.url())) sent.push(request.url())
   })

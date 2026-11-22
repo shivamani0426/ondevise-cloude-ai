@@ -119,10 +119,6 @@ function feeMentions(h: Hit): Array<TermClaim & { polarity: 'waived' | 'charged'
   return out
 }
 
-function distinctSources<T extends Hit>(values: T[]): boolean {
-  return new Set(values.map(item => item.sourceId)).size > 1
-}
-
 export function compareDocumentClaims(documents: EvidenceDocument[]): CaseFinding[] {
   if (documents.length < 2) return []
   const findings: CaseFinding[] = []

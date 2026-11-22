@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { firebaseConfigured, supportsChromeOnDevice } from '../firebase'
-import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalPrompt, reportInvestigation, validateAIReview } from './core'
+import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalPrompt, reportInvestigation, validateAIReview, validatePrivacyCandidates } from './core'
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
 import { analyzeWithLocalModel, analyzeWithCloudModel } from './ai'
@@ -45,6 +45,7 @@ export default function InvestigationWorkspace() {
   const [payloadApproved, setPayloadApproved] = useState(false)
   const [cloudAttempted, setCloudAttempted] = useState(false)
   const [localAttempted, setLocalAttempted] = useState(false)
+  const [localSensitive, setLocalSensitive] = useState<string[]>([])
 
   const graph = useMemo(() => investigation ? buildGraph(investigation) : null, [investigation])
   const detail = investigation?.findings.find(finding => finding.id === selectedFinding)
@@ -65,6 +66,7 @@ export default function InvestigationWorkspace() {
       setCloudStatus('')
       setCloudPayload('')
       setLocalAttempted(false)
+      setLocalSensitive([])
       setCloudAttempted(false)
       setSparkConfirmed(false)
       setPayloadApproved(false)
@@ -123,6 +125,7 @@ export default function InvestigationWorkspace() {
     setPayloadApproved(false)
     setSparkConfirmed(false)
     setLocalStatus('')
+    setLocalSensitive([])
     setCloudStatus('')
     setError('')
     setStatus('Correction saved only in browser memory. Re-run analysis to refresh all findings and graph links.')
@@ -150,10 +153,12 @@ export default function InvestigationWorkspace() {
     try {
       const result = await analyzeWithLocalModel(makeLocalPrompt(documents), setModelDownload)
       const grounded = validateAIReview(result.text, documents, 'on-device')
+      const proposedPrivate = validatePrivacyCandidates(result.text, documents)
+      setLocalSensitive(proposedPrivate)
       setInvestigation(previous => previous ? { ...previous, findings: [
         ...previous.findings.filter(finding => finding.origin !== 'on-device'), ...grounded,
       ] } : previous)
-      setLocalStatus('Verified ' + result.source + '. ' + grounded.length + ' source-grounded AI hypotheses accepted. ' +
+      setLocalStatus('Verified ' + result.source + '. ' + grounded.length + ' source-grounded AI hypotheses and ' + proposedPrivate.length + ' literal privacy candidates accepted. ' +
         (grounded.length ? 'Review every citation.' : 'Other output was rejected because its source references or JSON structure could not be verified.'))
     } catch (reason) {
       setLocalStatus('Local AI review not completed: ' + describeError(reason) + '. No automatic cloud fallback.')
@@ -164,7 +169,7 @@ export default function InvestigationWorkspace() {
 
   function prepareCloud() {
     if (busy || !investigation || !documents.length) return
-    const prepared = makeCloudPayload(documents)
+    const prepared = makeCloudPayload(documents, localSensitive)
     if (!prepared.included) {
       setError('No excerpts fit the cloud payload limits. The cloud request was not prepared.')
       return
@@ -216,6 +221,7 @@ export default function InvestigationWorkspace() {
     setPayloadApproved(false)
     setCloudAttempted(false)
     setLocalAttempted(false)
+    setLocalSensitive([])
     setRedactions(0)
     setRedactionTypes([])
     setIncluded(0)
@@ -389,7 +395,7 @@ export default function InvestigationWorkspace() {
         <div className="case-panel-top"><h2 id="report-title">5. Export or delete case</h2><span className="case-tag">No server storage</span></div>
         <p>Download a redacted local text report with document IDs, findings and source anchors. Original filenames are omitted. Automatic masking is incomplete, so read the report before sharing.</p>
         <div className="case-actions">
-          <button className="primary-action" onClick={() => saveText('phantomgraph-redacted-report.txt', reportInvestigation(investigation))} disabled={Boolean(busy)}>Download redacted investigation report</button>
+          <button className="primary-action" onClick={() => saveText('phantomgraph-redacted-report.txt', reportInvestigation(investigation, localSensitive))} disabled={Boolean(busy)}>Download redacted investigation report</button>
           <button className="outline-action" onClick={clearAll} disabled={Boolean(busy)}>Clear case from memory</button>
         </div>
       </section>}

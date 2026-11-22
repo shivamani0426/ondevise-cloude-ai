@@ -497,7 +497,8 @@ export function validateApprovedCloudPayload(payload: string, documents: Evidenc
 // the application; changing a colon, amount, negation or source is impossible
 // through model-generated wording because no wording is accepted from the model.
 export type LocalEvidenceChoice = { id: string; ref: string; quote: string }
-export type LocalEvidencePlan = { prompt: string; choices: LocalEvidenceChoice[] }
+export type LocalEvidenceFocus = { title: string; refs: string[] }
+export type LocalEvidencePlan = { prompt: string; choices: LocalEvidenceChoice[]; focus?: LocalEvidenceFocus }
 export type LocalEvidenceDiagnostics = {
   format: 'invalid-json' | 'invalid-schema' | 'valid-json'
   proposed: number
@@ -516,7 +517,25 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
     'Return ONLY compact JSON {"selectedIds":["E1","E2"],"privacyCandidates":[]}. ' +
     'The selectedIds must come from the OPTION IDs shown. Use [] if unsure. ' +
     'At most TWO privacyCandidates containing clear personal or company identifiers ONLY; never choose quantities, dates, prices, shipment status or generic factual text. Copy candidates literally; if unsure return [].\n'
-  const cited = new Set(findings.flatMap(finding => finding.refs))
+  // In a multi-document case, let the already source-cited rule finding
+  // define which excerpts the small local model is reviewing. This does not
+  // establish that a selected passage proves that finding.
+  const focusFinding = findings.find(finding => finding.origin === 'rules' &&
+    finding.status !== 'Insufficient evidence' &&
+    new Set(finding.refs.map(ref => ref.split(':')[0])).size >= 2)
+  const focus = focusFinding ? {
+    title: focusFinding.title,
+    refs: unique(focusFinding.refs),
+  } : undefined
+  const cited = new Set(focus?.refs || findings.flatMap(finding => finding.refs))
+  const factNumbers = focusFinding
+    ? unique(focusFinding.detail.match(/\b\d+(?:\.\d+)?\b/g) || []).filter(token => token.length <= 12)
+    : []
+  const focusWords = focusFinding
+    ? unique((focusFinding.title + ' ' + focusFinding.detail).toLowerCase()
+      .match(/\b[a-z]{4,}\b/g) || [])
+      .filter(word => !/^(?:this|that|these|those|their|source|sources|different|review|evidence|records|recorded|need|needs|may|could|amount|amounts|have|been|which|from|with|they|than|into|what|were|also|both)$/.test(word))
+    : []
   const relevance = (value: string, ref: string): number => {
     let score = cited.has(ref) ? 5 : 0
     if (/\b(?:shall|must|may not|will|cannot|not|required|prohibited|effective|expires|deadline|due|subject to|pending|cancel|refund|received|delivered|shipped)\b/i.test(value)) score += 3
@@ -524,12 +543,17 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
     if (/(?:₹|INR|Rs\.?|USD|\$|€|£)\s?\d|\b\d+(?:\.\d+)?\s?%/.test(value)) score += 3
     if (/\b\d+(?:\.\d+)?\s?(?:kg|km|hours?|days?|months?|years?|items?|units?)\b/i.test(value)) score += 2
     if (/[:=]\s*\S{3}/.test(value)) score += 1
+    const digits = new Set(value.match(/\b\d+(?:\.\d+)?\b/g) || [])
+    score += 7 * factNumbers.filter(token => digits.has(token)).length
+    const words = new Set(value.toLowerCase().match(/\b[a-z]{4,}\b/g) || [])
+    score += Math.min(5, focusWords.filter(word => words.has(word)).length)
     return score
   }
   const ranked = documents.slice(0, 6).map(document => {
     const pieces: Array<{ ref: string; quote: string; score: number; order: number }> = []
     for (const [index, segment] of document.segments.slice(0, 240).entries()) {
       const ref = sourceRef(document, segment)
+      if (focus && !cited.has(ref)) continue
       const raw = normalizeQuote(segment.text)
       if (!raw || /^\[No (?:readable|extractable)/i.test(raw)) continue
       // Break long PDF page strings into phrases without inventing or
@@ -551,18 +575,23 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
 
   const choices: LocalEvidenceChoice[] = []
   let prompt = introduction
+  if (focus) {
+    prompt += 'FOCUS rule-based review cue: ' + focus.title.slice(0, 110) +
+      '. Prefer quotations directly relevant to this cue from its cited sources. ' +
+      'Even matching excerpts do not establish a true contradiction.\n'
+  }
   for (let round = 0; round < 2 && choices.length < MAX_CHOICES; round++) {
     for (const pieces of ranked) {
       const piece = pieces[round]
       if (!piece || choices.length >= MAX_CHOICES) continue
       const id = 'E' + (choices.length + 1)
       const block = '\nOPTION ' + id + ' [SOURCE ' + piece.ref + '] ' + JSON.stringify(piece.quote)
-      if (prompt.length + block.length > MAX_PROMPT_CHARS) return { prompt, choices }
+      if (prompt.length + block.length > MAX_PROMPT_CHARS) return { prompt, choices, focus }
       prompt += block
       choices.push({ id, ref: piece.ref, quote: piece.quote })
     }
   }
-  return { prompt, choices }
+  return { prompt, choices, focus }
 }
 
 // Compatibility helper for tests and external callers. All production local
@@ -573,6 +602,7 @@ export function makeLocalPrompt(documents: EvidenceDocument[]): string {
 
 export function validateLocalEvidenceSelection(
   raw: string, documents: EvidenceDocument[], choices: LocalEvidenceChoice[],
+  focus?: LocalEvidenceFocus,
 ): CaseFinding[] {
   const parsed = parseAIReview(raw)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
@@ -585,12 +615,22 @@ export function validateLocalEvidenceSelection(
   // A mixed valid and invalid selection is rejected *as a whole*; never
   // invent a missing choice or quietly drop an unknown ID.
   if (selected.some(choice => !choice) || !selected.length) return []
+  if (focus && selected.some(choice => !focus.refs.includes(choice!.ref))) return []
   const evidence = selected.map(choice => ({ ref: choice!.ref, quote: choice!.quote }))
-  return validateAIReview(JSON.stringify({ findings: [{ evidence }] }), documents, 'on-device')
+  const verified = validateAIReview(JSON.stringify({ findings: [{ evidence }] }), documents, 'on-device')
+  if (!focus) return verified
+  return verified.map(finding => ({
+    ...finding,
+    title: 'AI-selected passages for rule review',
+    detail: 'The model selected original excerpts cited by the rule-based concern "' +
+      focus.title + '". Quote matching does NOT verify the concern, the relevance of each passage, or any conclusion.',
+    nextStep: 'Read the complete cited passages and confirm that they concern the same subject, process stage, and time period.',
+  }))
 }
 
 export function inspectLocalEvidenceSelection(
   raw: string, documents: EvidenceDocument[], choices: LocalEvidenceChoice[],
+  focus?: LocalEvidenceFocus,
 ): LocalEvidenceDiagnostics {
   const parsed = parseAIReview(raw)
   const base = { proposed: 0, accepted: 0, invalidChoices: 0, privacySuggested: 0, privacyAccepted: 0 }
@@ -602,7 +642,7 @@ export function inspectLocalEvidenceSelection(
   const object = parsed as { selectedIds: unknown[]; privacyCandidates?: unknown }
   const allowed = new Set(choices.map(choice => choice.id))
   const invalidChoices = object.selectedIds.filter(id => typeof id !== 'string' || !allowed.has(id)).length
-  const accepted = validateLocalEvidenceSelection(raw, documents, choices).length
+  const accepted = validateLocalEvidenceSelection(raw, documents, choices, focus).length
   const privacySuggested = Array.isArray(object.privacyCandidates) ? object.privacyCandidates.length : 0
   const privacyAccepted = validatePrivacyCandidates(raw, documents).length
   const summary = object.selectedIds.length === 0 && privacySuggested === 0

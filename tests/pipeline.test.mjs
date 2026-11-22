@@ -50,7 +50,7 @@ test('cloud preview redacts identifiers, never exposes filenames, and retains ci
   assert.doesNotMatch(value.payload, /\+919876543210/)
   assert.doesNotMatch(value.payload, /Abc123SECRET/)
   assert.doesNotMatch(value.payload, /message\.txt/)
-  assert.match(value.payload, /\[SOURCE source-1:a-1/)
+  assert.match(value.payload, /"id": "source-1:a-1"/)
   assert.match(value.payload, /UNTRUSTED/)
 })
 
@@ -67,7 +67,7 @@ test('AI suggestions with fabricated citations are rejected rather than added to
   const real = JSON.stringify({ findings: [{ title: 'Fee statements need confirmation', detail: 'Document statements may be inconsistent; independently verify details.', refs: ['source-0:a-1', 'source-1:a-0'], nextStep: 'Verify with official issuer.' }] })
   const findings = validateAIReview(real, documents, 'on-device')
   assert.equal(findings.length, 1)
-  assert.equal(findings[0].status, 'Unverified')
+  assert.equal(findings[0].status, 'Unverified hypothesis')
   assert.deepEqual(findings[0].refs, ['source-0:a-1', 'source-1:a-0'])
 })
 
@@ -79,7 +79,8 @@ test('non-JSON model output is never treated as evidence', () => {
 test('report includes sources, uncertainty, exact anchors and no fabricated model claims', () => {
   const result = analyzeEvidence(documents)
   const report = reportInvestigation(result)
-  assert.match(report, /offer\.txt/)
+  assert.doesNotMatch(report, /offer\.txt|message\.txt|recruiter@example\.com|\+919876543210/)
+  assert.match(report, /REDACTED LOCAL INVESTIGATION REPORT/)
   assert.match(report, /source-0:a-1/)
   assert.match(report, /LIMITATIONS/)
   assert.match(report, /not professional advice or fraud determinations/)
@@ -92,4 +93,29 @@ test('empty sources never generate AI or unverifiable findings', () => {
   assert.deepEqual(result.findings, [])
   assert.deepEqual(result.entities, [])
   assert.deepEqual(buildGraph(result).nodes, [])
+})
+
+
+test('conflicting salary and joining dates get grounded but cautious conflict findings', () => {
+  const sources = [
+    { id: 'source-0', name: 'terms.txt', format: 'TXT', size: 20, warnings: [], segments: [
+      { id: 'a-0', anchor: 'line 1', text: 'Monthly stipend ₹35,000 per month. Start date 2027-01-10.' },
+    ] },
+    { id: 'source-1', name: 'message.txt', format: 'TXT', size: 20, warnings: [], segments: [
+      { id: 'a-0', anchor: 'line 1', text: 'Monthly stipend ₹25,000 per month. Start date 2027-02-10.' },
+    ] },
+  ]
+  const results = analyzeEvidence(sources)
+  assert.ok(results.findings.some(f => /Different compensation figures/.test(f.title) && f.status === 'Corroborated conflict'))
+  assert.ok(results.findings.some(f => /Different start or joining dates/.test(f.title) && f.status === 'Corroborated conflict'))
+  assert.ok(results.entities.some(e => e.kind === 'date'))
+})
+
+test('empty or unclear extraction is labelled insufficient rather than confirmed safe', () => {
+  const safe = [{
+    id: 'source-0', name: 'note.txt', format: 'TXT', size: 15, warnings: [],
+    segments: [{ id: 'a-0', anchor: 'line 1', text: 'General meeting details.' }],
+  }]
+  const result = analyzeEvidence(safe)
+  assert.equal(result.findings[0].status, 'Insufficient evidence')
 })

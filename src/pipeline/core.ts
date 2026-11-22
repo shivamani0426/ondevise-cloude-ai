@@ -13,6 +13,12 @@ export type EntityKind = 'email' | 'domain' | 'amount' | 'phone' | 'reference' |
 export type CaseEntity = { id: string; kind: EntityKind; label: string; refs: string[] }
 export type FindingStatus = 'Corroborated conflict' | 'Possible concern' | 'Unverified hypothesis' | 'Insufficient evidence'
 export type GroundedQuote = { ref: string; quote: string }
+export type FindingExplanation = {
+  basis: string
+  context: string
+  limitation: string
+  compared?: { ref: string; field: string; value: string }[]
+}
 export type CaseFinding = {
   id: string
   title: string
@@ -21,6 +27,7 @@ export type CaseFinding = {
   nextStep: string
   refs: string[]
   quotes?: GroundedQuote[]
+  explanation?: FindingExplanation
   origin: 'rules' | 'on-device' | 'cloud'
 }
 export type Investigation = { documents: EvidenceDocument[]; entities: CaseEntity[]; findings: CaseFinding[] }
@@ -705,6 +712,15 @@ export function reportInvestigation(investigation: Investigation, suggestions: s
     for (const ref of finding.refs) {
       const origin = findSource(investigation.documents, ref)
       if (origin) lines.push('  ' + ref + ' | ' + origin.segment.anchor + ' | ' + safe(limit(origin.segment.text, 280)))
+    }
+    if (finding.explanation) {
+      lines.push('EXPLANATION (automatic review cue, not verification):')
+      lines.push('  Basis: ' + safe(finding.explanation.basis))
+      lines.push('  Context: ' + safe(finding.explanation.context))
+      lines.push('  Limits: ' + safe(finding.explanation.limitation))
+      for (const claim of finding.explanation.compared || []) {
+        lines.push('  ' + claim.ref + ' | ' + safe(claim.field) + ': ' + safe(claim.value))
+      }
     }
     if (finding.quotes?.length) {
       lines.push('AI-selected literal quotations (text-match only; meanings unverified):')

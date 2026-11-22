@@ -376,6 +376,17 @@ export default function InvestigationWorkspace() {
             })}
             <p className="case-caution">Verbatim quotation matching confirms that the extracted text contains the phrase—not that the original document is authentic or that a model's interpretation is correct.</p>
           </div>}
+          {detail.explanation && <details className="case-explanation">
+            <summary>Why this finding was raised</summary>
+            <p><strong>Evidence basis:</strong> {detail.explanation.basis}</p>
+            <p><strong>Context check:</strong> {detail.explanation.context}</p>
+            {detail.explanation.compared?.map((claim, index) => <p key={claim.ref + '-' + index}>
+              <button className="inline-link" type="button" onClick={() => setSelectedRef(claim.ref)}>
+                {claim.field}: {claim.value}
+              </button>
+            </p>)}
+            <p className="case-caution"><strong>Limits:</strong> {detail.explanation.limitation}</p>
+          </details>}
           <strong>Verification step</strong><p>{detail.nextStep}</p>
           <strong>Source citations</strong>
           <div className="case-citations">{detail.refs.map(ref => {

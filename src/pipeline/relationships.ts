@@ -1,4 +1,6 @@
 import type { CaseFinding, EvidenceDocument } from './core'
+import { makeStructuredClaim, compareClaimContext } from './claims.ts'
+import type { Compatibility, StructuredClaim } from './claims.ts'
 
 // Domain-neutral evidence linking. This works on local extracted source text,
 // not filenames, external services, or model-generated interpretations.
@@ -127,11 +129,6 @@ function readRecord(document: EvidenceDocument): RecordData {
 }
 
 const compatibleFamily = (a: string, b: string) => a === b || genericFamilies.has(a) || genericFamilies.has(b)
-const sameValue = (a: string, b: string): boolean => {
-  const x = a.trim().toLowerCase().replace(/[\s,]+/g, '')
-  const y = b.trim().toLowerCase().replace(/[\s,]+/g, '')
-  return x === y
-}
 
 type LinkedGroup = { identifiers: Identifier[]; fields: Field[] }
 function linkedGroups(records: RecordData[]): LinkedGroup[] {
@@ -176,6 +173,54 @@ function linkedGroups(records: RecordData[]): LinkedGroup[] {
   return groups.slice(0, 8)
 }
 
+// Construct claims only for fields securely scoped to a matched reference.
+// The parsing and source-linking logic remains in this module: no second parser.
+function claimFor(group: LinkedGroup, field: Field): StructuredClaim | null {
+  const owner = group.identifiers.find(item => item.docId === field.docId)
+  if (!owner) return null
+  const ownFields = group.fields.filter(item =>
+    item.docId === field.docId && item.ref === field.ref)
+  // If a document uses one record ID across several lines, its metadata may
+  // appear on a distinct line; only use document-wide metadata if the field's
+  // row does not have independent metadata.
+  const values = (key: RegExp): string | undefined =>
+    ownFields.find(item => key.test(item.key))?.value ||
+    group.fields.find(item => item.docId === field.docId && key.test(item.key))?.value
+  const context = {
+    version: values(/^(?:revision|version|amendment)(?:_number|_no)?$/),
+    approval: values(/^(?:signature_status|approval_status|signed|approved)$/),
+    condition: values(/^(?:condition|terms_condition|scope)$/),
+  }
+  return makeStructuredClaim({
+    ref: field.ref, sourceId: field.docId,
+    family: owner.family, reference: owner.value,
+    property: field.key, literal: field.value, context,
+  })
+}
+
+type Compared = { a: StructuredClaim; b: StructuredClaim; evaluation: Compatibility }
+
+// A reference equality is a candidate link; only compare claims sharing
+// the same field name and compatible source identity. Prefer a genuinely
+// comparable changed fact over a routine workflow/status progression.
+function compareGroup(group: LinkedGroup): Compared | null {
+  const claims = group.fields.map(item => claimFor(group, item))
+    .filter((item): item is StructuredClaim => item !== null)
+  const options: Compared[] = []
+  for (let i = 0; i < claims.length; i++) {
+    for (let j = i + 1; j < claims.length; j++) {
+      if (claims[i].sourceId === claims[j].sourceId ||
+          claims[i].property !== claims[j].property) continue
+      const evaluation = compareClaimContext(claims[i], claims[j])
+      if (evaluation.outcome === 'different-values' || evaluation.outcome === 'context-dependent') {
+        options.push({ a: claims[i], b: claims[j], evaluation })
+      }
+    }
+  }
+  return options.find(item => item.evaluation.outcome === 'different-values') ||
+    options.find(item => item.evaluation.outcome === 'context-dependent') || null
+}
+
 /** A linked identity is a *matching token* with source anchors, not a real-world verification. */
 export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
   if (documents.length < 2) return []
@@ -187,34 +232,37 @@ export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
     if (results.length >= 5) break
     const matchingSources = unique(group.identifiers.map(item => item.docId))
     const ids = unique(group.identifiers.map(item => item.ref))
-    // Compare only fields with identical semantic labels, rather than
-    // guessing that an invoice due date is an activation date or that shipped
-    // and delivered quantities are interchangeable.
-    const keys = unique(group.fields.map(item => item.key))
-    let pair: [Field, Field] | undefined
-    for (const key of keys) {
-      const values = group.fields.filter(item => item.key === key)
-      const differing = values.find(a => values.some(b =>
-        a.docId !== b.docId && !sameValue(a.value, b.value)))
-      const other = differing && values.find(b => b.docId !== differing.docId &&
-        !sameValue(differing.value, b.value))
-      if (differing && other) { pair = [differing, other]; break }
-    }
-    const refs = pair
-      ? unique([...ids, pair[0].ref, pair[1].ref]).slice(0, 10)
+    const selected = compareGroup(group)
+    const refs = selected
+      ? unique([...ids, selected.a.ref, selected.b.ref]).slice(0, 10)
       : ids.slice(0, 10)
     if (refs.length < 2) continue
-    if (pair) {
+    if (selected) {
+      const { a, b, evaluation } = selected
+      const changed = evaluation.outcome === 'context-dependent'
       results.push({
         id: 'relationship-' + results.length,
-        title: 'Same reference, different recorded field values',
-        status: 'Possible concern',
-        detail: 'An identical structured reference appears across ' + matchingSources.length +
-          ' documents, but the explicitly labelled field "' +
-          pair[0].key.replace(/_/g, ' ').slice(0, 42) +
-          '" has different extracted values. This does not establish deception; records may be updated, provisional, or refer to different stages.',
-        nextStep: 'Verify the original identifiers, subject, record versions, dates, field definitions and approvals before deciding whether the difference is meaningful.',
+        title: changed
+          ? 'Same reference, context-dependent recorded change'
+          : 'Same reference, different recorded field values',
+        status: changed ? 'Unverified hypothesis' : 'Possible concern',
+        detail: 'An identical structured reference appears across ' +
+          matchingSources.length + ' documents. ' + evaluation.basis + ' ' +
+          (changed ? 'The change may reflect a normal progression or revision.' :
+            'The discrepancy needs reconciliation, not a fraud determination.'),
+        nextStep: changed
+          ? 'Confirm the chronology, approvals and applicable version using the original records.'
+          : 'Check the original field values, currency or units, revisions and approvals with the issuer.',
         refs, origin: 'rules',
+        explanation: {
+          basis: evaluation.basis,
+          context: evaluation.context,
+          limitation: evaluation.limitation,
+          compared: [
+            { ref: a.ref, field: a.property.replace(/_/g, ' '), value: a.value.literal },
+            { ref: b.ref, field: b.property.replace(/_/g, ' '), value: b.value.literal },
+          ],
+        },
       })
     } else {
       results.push({
@@ -225,6 +273,11 @@ export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
           matchingSources.length + ' distinct sources. Matching text alone does not prove common ownership, authenticity or that every claim describes the same event.',
         nextStep: 'Compare the complete referenced records, parties and dates using independently obtained originals. Do not infer a fraudulent link from a matching ID alone.',
         refs, origin: 'rules',
+        explanation: {
+          basis: 'The extracted documents contain matching, explicitly labelled record identifiers.',
+          context: 'No compatible, differing field values were established for this shared reference. Different process stages, currencies and unparseable fields are not treated as contradictions.',
+          limitation: 'The linked records may still concern different real-world parties or events; original documents and issuer confirmation are required.',
+        },
       })
     }
   }

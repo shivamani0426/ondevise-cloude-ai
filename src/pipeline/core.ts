@@ -323,24 +323,61 @@ export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): 
     privacyAccepted: result.privacyAccepted, summary }
 }
 
-// AI privacy suggestions are accepted only if they match literal local evidence.
-// This validation never authorizes cloud use and never treats model output as proof.
+// Literal quotation matching is necessary for AI privacy suggestions but not
+// sufficient: an inventory quantity such as "96 units" is evidence, not PII.
+// Never let free-text model output erase investigative facts. Only recognized
+// identifiers, organization labels, or context-labeled personal names qualify
+// for automatic optional masking. Other private context still needs manual
+// inspection/editing of the cloud draft before consent.
+function sensitivePrivacyCandidate(value: string, sourceText: string): boolean {
+  if (value.trim() !== value || value.length < 4 || value.length > 120 || !sourceText.includes(value)) return false
+  // Guard common evidence facts: shipment quantities, prices and standalone
+  // dates must not become "privacy redactions" just because AI selected them.
+  if (/^\d[\d,]*(?:\.\d+)?\s*(?:units?|items?|pieces?|pcs|packages?|boxes|cartons|days?|weeks?|months?|years?|kg|km)\b/i.test(value) ||
+      /^(?:(?:₹|€|\$|£)\s*|(?:USD|INR|EUR|GBP|Rs\.?)\s*)\d/i.test(value) ||
+      /^(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2})$/.test(value)) return false
+
+  // Only accept complete known identifier patterns, not arbitrary phrases
+  // containing one identifier and extra instructions or factual claims.
+  if (sensitivePatterns.some(pattern => {
+    const exact = new RegExp('^(?:' + pattern.re.source + ')$', pattern.re.flags.replace(/[gy]/g, ''))
+    return exact.test(value)
+  })) return true
+
+  // Company names may be confidential, but generic shipping destinations,
+  // quantities and technical field names are not automatic privacy candidates.
+  if (/^(?:[A-Z][\p{L}'-]*\s+){1,4}(?:Labs|Technologies|Solutions|Services|Consulting|Enterprises|Corporation|Limited|LLP|Studio|Inc\.?|LLC)$/u.test(value)) return true
+
+  // For bare personal names, require an explicit field label in the SAME
+  // source excerpt. Capitalization alone is not evidence of private identity.
+  if (/^[A-Z][\p{L}'-]*(?:[\s-][A-Z][\p{L}'-]*){1,3}$/u.test(value)) {
+    const escaped = value.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&')
+    return new RegExp('\\b(?:name|contact|client|customer|employee|patient|recipient|supplier|signed\\s+by)\\s*(?::|=|-)\\s*' + escaped + '(?![\\p{L}])', 'iu').test(sourceText)
+  }
+  return false
+}
+
+// Do not auto-mask a model-selected phrase unless it is both literally present
+// in a source excerpt and independently recognizable as private context.
 export function validatePrivacyCandidates(raw: string, documents: EvidenceDocument[]): string[] {
   const parsed = parseAIReview(raw)
   if (parsed === null) return []
   if (!parsed || typeof parsed !== 'object' || !('privacyCandidates' in parsed)) return []
   const list = (parsed as { privacyCandidates?: unknown }).privacyCandidates
   if (!Array.isArray(list)) return []
-  const corpus = documents.flatMap(doc => doc.segments.map(segment => segment.text)).join('\n')
-  return unique(list.filter((x): x is string => typeof x === 'string' && x.length >= 4 && x.length <= 120 && corpus.includes(x))).slice(0, 16)
+  const segments = documents.flatMap(doc => doc.segments.map(segment => segment.text))
+  return unique(list.filter((x): x is string => typeof x === 'string' &&
+    segments.some(segment => sensitivePrivacyCandidate(x, segment)))).slice(0, 16)
 }
 
-export function redactWithSuggestions(text: string, suggestions: string[] = []): { text: string; count: number; categories: string[] } {
+export function redactWithSuggestions(text: string, suggestions: string[] = [], sourceContext: string = text): { text: string; count: number; categories: string[] } {
   const rule = redactForCloud(text)
   let result = rule.text
   let count = rule.count
   for (const suggestion of suggestions) {
-    if (suggestion.length < 4 || !result.includes(suggestion)) continue
+    // Defense in depth for callers of this exported helper. Model-suggested
+    // quantities/dates/prices cannot be masked even if supplied directly.
+    if (!sensitivePrivacyCandidate(suggestion, sourceContext) || !result.includes(suggestion)) continue
     const matches = result.split(suggestion)
     count += matches.length - 1
     result = matches.join('[LOCAL_AI_REDACTED]')
@@ -398,10 +435,13 @@ export function makeCloudPayload(documents: EvidenceDocument[], suggestions: str
   }
   let redactions = 0
   const categories: string[] = []
+  // One recognized identifier may occur without its label in later excerpts.
+  // Validate against all local source text, then redact every literal occurrence.
+  const privacyContext = documents.flatMap(doc => doc.segments.map(segment => segment.text)).join('\n')
   for (const doc of documents.slice(0, 8)) {
     for (const segment of doc.segments.slice(0, 35)) {
       if (/^\[No (?:extractable|readable)/i.test(segment.text)) continue
-      const cleaned = redactWithSuggestions(segment.text.slice(0, 1100), suggestions)
+      const cleaned = redactWithSuggestions(segment.text.slice(0, 1100), suggestions, privacyContext)
       const entry = { id: sourceRef(doc, segment), sourceId: doc.id, kind: doc.format,
         anchor: segment.anchor, excerpt: cleaned.text }
       request.redactedEvidence.push(entry)
@@ -475,7 +515,7 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
     'Choose up to TWO useful option IDs for ONE cautious review. Do not write or change quotes or draw conclusions. ' +
     'Return ONLY compact JSON {"selectedIds":["E1","E2"],"privacyCandidates":[]}. ' +
     'The selectedIds must come from the OPTION IDs shown. Use [] if unsure. ' +
-    'At most TWO privacyCandidates, copied literally from an option; never guess.\n'
+    'At most TWO privacyCandidates containing clear personal or company identifiers ONLY; never choose quantities, dates, prices, shipment status or generic factual text. Copy candidates literally; if unsure return [].\n'
   const cited = new Set(findings.flatMap(finding => finding.refs))
   const relevance = (value: string, ref: string): number => {
     let score = cited.has(ref) ? 5 : 0
@@ -569,8 +609,8 @@ export function inspectLocalEvidenceSelection(
     ? 'Valid JSON; model selected no evidence or privacy candidates. Rule-based findings remain available.'
     : 'Model selected ' + object.selectedIds.length + ' option IDs; accepted ' + accepted +
       ' source-verified evidence group(s). Invalid IDs: ' + invalidChoices +
-      '. Literal privacy candidates: ' + privacyAccepted + '/' + privacySuggested +
-      '. Model-authored claims or rewritten quotations are never used.'
+      '. Recognized private identifiers: ' + privacyAccepted + '/' + privacySuggested +
+      ' suggested; unrecognized phrases are not automatically redacted. Model-authored claims or rewritten quotations are never used.'
   return { format: 'valid-json', proposed: object.selectedIds.length, accepted, invalidChoices,
     privacySuggested, privacyAccepted, summary }
 }
@@ -599,7 +639,8 @@ export function buildGraph(investigation: Investigation): CaseGraph {
 export function reportInvestigation(investigation: Investigation, suggestions: string[] = []): string {
   // Safe by default: redact identifiers in excerpts and omit original filenames.
   // The report is generated and downloaded locally; nothing is uploaded for export.
-  const safe = (text: string) => redactWithSuggestions(text, suggestions).text
+  const privacyContext = investigation.documents.flatMap(doc => doc.segments.map(segment => segment.text)).join('\n')
+  const safe = (text: string) => redactWithSuggestions(text, suggestions, privacyContext).text
   const lines = ['PHANTOMGRAPH AI — REDACTED LOCAL INVESTIGATION REPORT', 'Generated: ' + new Date().toISOString(), '',
     'LIMITATIONS: Automated extraction and heuristics can miss evidence. AI findings are unverified hypotheses, not professional advice or fraud determinations.',
     'Sensitive patterns are masked, but automatic redaction is incomplete. Read before sharing this report.',

@@ -62,6 +62,11 @@ function quantities(documents: EvidenceDocument[]): QuantityClaim[] {
         amount: Number(m[3].replace(/,/g, '')), unit: normalizeUnit(m[2] || m[4] || 'units'),
         stage: /shipped|dispatched|sent/i.test(m[1]) ? 'shipped' : /delivered/i.test(m[1]) ? 'delivered' : 'received',
       })
+      const z = /\b(shipped|dispatched|sent|delivered|received)\s+(?:quantity|count)\s+(?:is|of|:|=)\s*(\d[\d,]*)\s*(units?|items?|pieces?|pcs|packages?|boxes|cartons)\b/gi
+      for (const m of s.text.matchAll(z)) candidates.push({
+        amount: Number(m[2].replace(/,/g, '')), unit: normalizeUnit(m[3]),
+        stage: /shipped|dispatched|sent/i.test(m[1]) ? 'shipped' : /delivered/i.test(m[1]) ? 'delivered' : 'received',
+      })
       for (const candidate of candidates) {
         if (!Number.isSafeInteger(candidate.amount) || candidate.amount < 1 || candidate.amount > 100000000) continue
         if (result.some(existing => existing.ref === doc.id + ':' + s.id && existing.stage === candidate.stage && existing.amount === candidate.amount)) continue

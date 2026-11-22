@@ -197,3 +197,27 @@ test('real DOCX text is extracted in-browser with paragraph anchors', async ({ p
   await expect(page.locator('.case-excerpt blockquote')).toContainText('verification fee before joining')
   await expect(page.locator('.case-excerpt')).toContainText('paragraph 1')
 })
+
+
+test('unrelated CSV, JSON and Markdown files enter the same source-evidence workflow', async ({ page }) => {
+  await openWorkspace(page)
+  await page.locator('#evidence-upload').setInputFiles([
+    { name: 'inventory.csv', mimeType: 'text/csv',
+      buffer: Buffer.from('item,quantity,location\nWidget A,150,Depot One\nWidget B,200,Depot Two') },
+    { name: 'shipment.json', mimeType: 'application/json',
+      buffer: Buffer.from('{"trackingCode":"TRK-1234","status":"delivered","date":"2027-04-12"}') },
+    { name: 'lease.md', mimeType: 'text/markdown',
+      buffer: Buffer.from('# Rental Agreement\nThe tenant may not sublet without written consent.') },
+  ])
+  await page.getByRole('button', { name: 'Extract selected files locally' }).click()
+  await expect(page.getByText('Local extraction complete.', { exact: false })).toBeVisible()
+  await expect(page.locator('.case-source')).toHaveCount(3)
+  await page.getByRole('button', { name: 'Build evidence graph and findings' }).click()
+  await expect(page.getByRole('heading', { name: 'Evidence graph and findings' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Source excerpt: inventory.csv' })).toBeVisible()
+  await expect(page.locator('.case-excerpt blockquote')).toContainText('item,quantity,location')
+  await page.locator('.case-source').filter({hasText:'lease.md'}).getByRole('button',{name:'Inspect first excerpt'}).click()
+  await expect(page.locator('.case-excerpt blockquote')).toContainText('Rental Agreement')
+  await page.locator('.case-source').filter({hasText:'shipment.json'}).getByRole('button',{name:'Inspect first excerpt'}).click()
+  await expect(page.locator('.case-excerpt blockquote')).toContainText('trackingCode')
+})

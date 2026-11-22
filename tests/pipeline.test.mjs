@@ -1,0 +1,95 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import {
+  analyzeEvidence, buildGraph, makeCloudPayload, makeLocalPrompt, findSource, redactForCloud,
+  reportInvestigation, validateAIReview,
+} from '../src/pipeline/core.ts'
+
+const documents = [
+  {
+    id: 'source-0', name: 'offer.txt', format: 'TXT', size: 100, warnings: [],
+    segments: [
+      { id: 'a-0', anchor: 'line 1', text: 'Northstar Labs offers a stipend of ₹35,000 per month. Official website northstar.example.' },
+      { id: 'a-1', anchor: 'line 2', text: 'No registration or verification fee is required.' },
+    ],
+  },
+  {
+    id: 'source-1', name: 'message.txt', format: 'TXT', size: 100, warnings: [],
+    segments: [
+      { id: 'a-0', anchor: 'line 1', text: 'Please pay ₹2,499 registration verification fee today at northstarr.example.' },
+      { id: 'a-1', anchor: 'line 2', text: 'Contact recruiter@example.com or +919876543210 immediately. Password: Abc123SECRET' },
+    ],
+  },
+]
+
+test('analysis uses real source anchors and labels fee/domain/urgency issues cautiously', () => {
+  const result = analyzeEvidence(documents)
+  assert.equal(result.documents.length, 2)
+  assert.ok(result.findings.some(f => /Payment/.test(f.title)))
+  assert.ok(result.findings.some(f => /fee statements/.test(f.title)))
+  assert.ok(result.findings.some(f => /domains/.test(f.title)))
+  assert.ok(result.findings.some(f => /Time-pressure/.test(f.title)))
+  for (const finding of result.findings) {
+    assert.ok(finding.refs.length)
+    assert.notEqual(finding.status, 'Confirmed fraud')
+    for (const ref of finding.refs) assert.ok(findSource(documents, ref), 'Invalid evidence reference ' + ref)
+  }
+  const graph = buildGraph(result)
+  assert.ok(graph.nodes.length > result.documents.length)
+  for (const edge of graph.edges) {
+    assert.ok(graph.nodes.find(node => node.id === edge.from))
+    assert.ok(graph.nodes.find(node => node.id === edge.to))
+  }
+})
+
+test('cloud preview redacts identifiers, never exposes filenames, and retains citation keys', () => {
+  const value = makeCloudPayload(documents)
+  assert.ok(value.included > 0)
+  assert.ok(value.redactions >= 2)
+  assert.doesNotMatch(value.payload, /recruiter@example.com/)
+  assert.doesNotMatch(value.payload, /\+919876543210/)
+  assert.doesNotMatch(value.payload, /Abc123SECRET/)
+  assert.doesNotMatch(value.payload, /message\.txt/)
+  assert.match(value.payload, /\[SOURCE source-1:a-1/)
+  assert.match(value.payload, /UNTRUSTED/)
+})
+
+test('sensitive data protection recognizes ID patterns and passwords', () => {
+  const input = 'PAN ABCDE1234F Aadhaar 1234 5678 9012 card 4111111111111111 password=helloworld'
+  const result = redactForCloud(input)
+  assert.ok(result.count >= 4)
+  assert.doesNotMatch(result.text, /ABCDE1234F|1234 5678 9012|4111111111111111|helloworld/)
+})
+
+test('AI suggestions with fabricated citations are rejected rather than added to graph', () => {
+  const fake = JSON.stringify({ findings: [{ title: 'Certain criminal fraud', detail: 'This person is guilty of fraud', refs: ['source-0:invented'] }] })
+  assert.deepEqual(validateAIReview(fake, documents, 'cloud'), [])
+  const real = JSON.stringify({ findings: [{ title: 'Fee statements need confirmation', detail: 'Document statements may be inconsistent; independently verify details.', refs: ['source-0:a-1', 'source-1:a-0'], nextStep: 'Verify with official issuer.' }] })
+  const findings = validateAIReview(real, documents, 'on-device')
+  assert.equal(findings.length, 1)
+  assert.equal(findings[0].status, 'Unverified')
+  assert.deepEqual(findings[0].refs, ['source-0:a-1', 'source-1:a-0'])
+})
+
+test('non-JSON model output is never treated as evidence', () => {
+  assert.deepEqual(validateAIReview('It is 100% a scam', documents, 'cloud'), [])
+  assert.deepEqual(validateAIReview('{"findings":[{"title":"Claim","detail":"Unsupported","refs":[]}]}', documents, 'cloud'), [])
+})
+
+test('report includes sources, uncertainty, exact anchors and no fabricated model claims', () => {
+  const result = analyzeEvidence(documents)
+  const report = reportInvestigation(result)
+  assert.match(report, /offer\.txt/)
+  assert.match(report, /source-0:a-1/)
+  assert.match(report, /LIMITATIONS/)
+  assert.match(report, /not professional advice or fraud determinations/)
+  const prompt = makeLocalPrompt(documents)
+  assert.match(prompt, /SOURCE source-0:a-0/)
+})
+
+test('empty sources never generate AI or unverifiable findings', () => {
+  const result = analyzeEvidence([])
+  assert.deepEqual(result.findings, [])
+  assert.deepEqual(result.entities, [])
+  assert.deepEqual(buildGraph(result).nodes, [])
+})

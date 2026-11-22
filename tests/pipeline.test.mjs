@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   analyzeEvidence, buildGraph, makeCloudPayload, makeLocalPrompt, findSource, redactForCloud,
-  reportInvestigation, validateAIReview,
+  reportInvestigation, validateAIReview, validatePrivacyCandidates, redactWithSuggestions,
 } from '../src/pipeline/core.ts'
 
 const documents = [
@@ -118,4 +118,16 @@ test('empty or unclear extraction is labelled insufficient rather than confirmed
   }]
   const result = analyzeEvidence(safe)
   assert.equal(result.findings[0].status, 'Insufficient evidence')
+})
+
+test('local PII candidates must be literal evidence strings; no phantom masking', () => {
+  const raw = JSON.stringify({ findings: [], privacyCandidates: ['Northstar Labs', 'invented private name', '123'] })
+  const accepted = validatePrivacyCandidates(raw, documents)
+  assert.deepEqual(accepted, ['Northstar Labs'])
+  const draft = makeCloudPayload(documents, accepted)
+  assert.doesNotMatch(draft.payload, /Northstar Labs/)
+  assert.match(draft.payload, /LOCAL_AI_REDACTED/)
+  const exportText = reportInvestigation(analyzeEvidence(documents), accepted)
+  assert.doesNotMatch(exportText, /Northstar Labs|recruiter@example.com/)
+  assert.equal(redactWithSuggestions('Northstar Labs', accepted).count, 1)
 })

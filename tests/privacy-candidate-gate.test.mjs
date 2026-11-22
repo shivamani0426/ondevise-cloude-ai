@@ -102,3 +102,35 @@ test('recognized email and secret remain protected by deterministic rules',()=>{
   assert.doesNotMatch(prepared.payload,/private\.person@example\.com|SecretTOKEN999/)
   assert.ok(prepared.redactions>=2)
 })
+
+
+test('recognized labeled personal name is masked in every later excerpt and report quote',()=>{
+  const d=doc(0,'TXT',[
+    'Contact: Alice Kumar.',
+    'Alice Kumar signed the delivery confirmation for 96 units.',
+  ])
+  const raw=json(['Alice Kumar'])
+  const accepted=validatePrivacyCandidates(raw,[d])
+  assert.deepEqual(accepted,['Alice Kumar'])
+  const preview=makeCloudPayload([d],accepted)
+  assert.equal(preview.redactions,2)
+  assert.doesNotMatch(preview.payload,/Alice Kumar/)
+  assert.match(preview.payload,/96 units/)
+  const investigation={documents:[d],entities:[],findings:[{
+    id:'manual-check',title:'Source review',status:'Possible concern',
+    detail:'Review the delivery record.',nextStep:'Confirm relevant source.',refs:['source-0:a-1'],origin:'rules',
+  }]}
+  const report=reportInvestigation(investigation,accepted)
+  assert.doesNotMatch(report,/Alice Kumar/)
+  assert.match(report,/96 units/)
+})
+
+test('unlabeled locations are never masked from another segment by an unapproved candidate',()=>{
+  const d=doc(0,'TXT',[
+    'Goods are stored at Bay Depot.',
+    'Dispatch left Bay Depot with 120 units.',
+  ])
+  assert.deepEqual(validatePrivacyCandidates(json(['Bay Depot']),[d]),[])
+  assert.doesNotMatch(makeCloudPayload([d],['Bay Depot']).payload,/LOCAL_AI_REDACTED/)
+  assert.match(makeCloudPayload([d],['Bay Depot']).payload,/Bay Depot/)
+})

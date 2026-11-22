@@ -154,10 +154,12 @@ export default function InvestigationWorkspace() {
     setBusy('local')
     setLocalAttempted(true)
     setModelDownload(0)
-    setLocalStatus('Preparing local Firebase AI Logic model. Cloud fallback is disabled.')
+    setLocalStatus('Preparing a compact local AI review. No cloud fallback is allowed.')
     setLocalRaw('')
+    const startedAt = performance.now()
     try {
-      const result = await analyzeWithLocalModel(makeLocalPrompt(documents), setModelDownload)
+      const prompt = makeLocalPrompt(documents)
+      const result = await analyzeWithLocalModel(prompt, setModelDownload)
       setLocalRaw(result.text)
       const diagnostics = inspectLocalReview(result.text, documents)
       const grounded = validateAIReview(result.text, documents, 'on-device')
@@ -172,7 +174,8 @@ export default function InvestigationWorkspace() {
       setInvestigation(previous => previous ? { ...previous, findings: [
         ...previous.findings.filter(finding => finding.origin !== 'on-device'), ...grounded,
       ] } : previous)
-      setLocalStatus('Verified ' + result.source + '. ' + diagnostics.summary)
+      const seconds = Math.round((performance.now() - startedAt) / 1000)
+      setLocalStatus('Verified ' + result.source + ' after ' + seconds + ' seconds. ' + diagnostics.summary)
     } catch (reason) {
       setLocalStatus('Local AI review not completed: ' + describeError(reason) + '. No automatic cloud fallback.')
     } finally {
@@ -372,7 +375,7 @@ export default function InvestigationWorkspace() {
 
         <div className="case-model-section">
           <h3>A. On-device Firebase AI Logic</h3>
-          <p>Uses Chrome's local model. File excerpts stay on the device; the model is constrained to <code>ONLY_ON_DEVICE</code>, with no fallback. A failed JSON or citation check cannot overwrite the rule-based findings.</p>
+          <p>Uses Chrome's local model. To reduce CPU/GPU load, this optional review examines up to six high-relevance excerpts (maximum 2,400 prompt characters), not the whole case. The full rule-based graph still uses all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no fallback. AI findings with invalid citations are rejected.</p>
           <button className="outline-action" type="button" disabled={Boolean(busy) || !firebaseConfigured || !supportsChromeOnDevice() || localAttempted} onClick={localReview}>
             {busy === 'local' ? 'Local model analyzing…' : localAttempted ? 'Local review attempted' : 'Review case with on-device AI'}
           </button>

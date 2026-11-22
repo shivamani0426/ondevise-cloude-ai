@@ -242,7 +242,7 @@ export function inspectLocalReview(raw: string, documents: EvidenceDocument[]): 
   const base = { suggested: 0, accepted: 0, rejectedCitation: 0,
     rejectedStructure: 0, privacySuggested: 0, privacyAccepted: 0 }
   let parsed: unknown
-  try { parsed = JSON.parse(raw.trim().replace(/^\x60\x60\x60(?:json)?\\s*/i, '').replace(/\\s*\x60\x60\x60$/, '')) }
+  try { parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')) }
   catch { return { ...base, format: 'invalid-json', summary: 'The local model returned non-JSON text. No AI findings were accepted.' } }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
       !('findings' in parsed) || !Array.isArray((parsed as {findings?: unknown}).findings)) {

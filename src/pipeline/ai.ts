@@ -1,5 +1,24 @@
-import { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode, InferenceSource } from 'firebase/ai'
+import { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode, InferenceSource, Schema } from 'firebase/ai'
 import { CLOUD_MODEL, ensureAppCheckToken, getFirebaseApp, supportsChromeOnDevice } from '../firebase'
+
+// Firebase's on-device Prompt API can constrain generated JSON directly. A prompt
+// alone does not guarantee JSON, which made successful local inference look like
+// an analysis failure. This is a format constraint, NOT a trust or provenance check.
+const localReviewSchema = Schema.object({
+  properties: {
+    findings: Schema.array({
+      items: Schema.object({
+        properties: {
+          title: Schema.string(),
+          detail: Schema.string(),
+          refs: Schema.array({ items: Schema.string() }),
+          nextStep: Schema.string(),
+        },
+      }),
+    }),
+    privacyCandidates: Schema.array({ items: Schema.string() }),
+  },
+})
 
 export type AIResult = { source: 'ON_DEVICE' | 'IN_CLOUD'; text: string }
 
@@ -16,6 +35,7 @@ export async function analyzeWithLocalModel(prompt: string, onProgress: (value: 
         expectedInputs: [{ type: 'text', languages: ['en'] }],
         expectedOutputs: [{ type: 'text', languages: ['en'] }],
       },
+      promptOptions: { responseConstraint: localReviewSchema },
     },
   })
   await model.initializeDeviceModel(onProgress)

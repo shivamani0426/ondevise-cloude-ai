@@ -197,8 +197,8 @@ test('compact local prompt prioritizes risk-bearing excerpts over irrelevant boi
   }]
   const prompt = makeLocalPrompt(selected)
   assert.ok(prompt.indexOf('SOURCE source-0:a-1') < prompt.indexOf('SOURCE source-0:a-0'))
-  assert.match(prompt, /at most ONE/)
-  assert.match(prompt, /COPY 1–2 verbatim quotes/)
+  assert.match(prompt, /Choose up to TWO useful option IDs/)
+  assert.match(prompt, /selectedIds/)
 })
 
 

@@ -91,12 +91,29 @@ function cancellationTerms(h: Hit): TermClaim[] {
 
 function activationTerms(h: Hit): TermClaim[] {
   const result: TermClaim[] = []
-  if (!/\b(?:activat(?:ion|es?|ed)|effective date|commencement)\b/i.test(h.text)) return result
-  // Exclude invoice due_date/dated statements: don't compare a fee due date
-  // against an activation date.
-  const re = /(?:\bactivat(?:ion|es?|ed)\b|\beffective date\b|\bcommencement\b)[^\n.]{0,60}?\b(20\d{2}-\d{2}-\d{2})\b/gi
-  for (const m of h.text.matchAll(re)) {
-    result.push({ ...h, topic: 'activation-date', value: m[1] })
+  // A date must be explicitly assigned to activation, commencement, or
+  // effective-date semantics. "activation fee,80,2027-04-08" is an invoice
+  // line whose date might be due_date, not an activation date. Broadly
+  // searching 60 characters after the word "activation" fabricated a
+  // cross-document date conflict from such billing rows.
+  const date = '(20\\d{2}-\\d{2}-\\d{2})'
+  const labels = [
+    // Natural-language statement: "the service activates on 2027-04-12".
+    new RegExp('\\bactivat(?:es?|ed)\\s+(?:on|from|at)\\s+' + date + '\\b', 'gi'),
+    // Explicit typed fields: "activation_date: 2027-04-20",
+    // "effective date is 2027-04-20" or "commencement date = 2027-04-20".
+    new RegExp('\\b(?:activation|effective|commencement)[_\\s-]+date["\\x27]?\\s*(?::|=|is|on|of)\\s*["\\x27]?' + date + '\\b', 'gi'),
+    // Alternate prose: "activation begins on 2027-04-20".
+    new RegExp('\\b(?:activation|commencement)\\s+(?:begins|starts|commences)\\s+(?:on|from)\\s+' + date + '\\b', 'gi'),
+    // Explicit JSON/CSV-like scalar: "activation": "2027-04-20".
+    new RegExp('\\b(?:activation|effective_date|commencement_date)["\\x27]?\\s*[:=]\\s*["\\x27]?' + date + '\\b', 'gi'),
+  ]
+  for (const re of labels) {
+    for (const match of h.text.matchAll(re)) {
+      if (!result.some(item => item.value === match[1])) {
+        result.push({ ...h, topic: 'activation-date', value: match[1] })
+      }
+    }
   }
   return result
 }

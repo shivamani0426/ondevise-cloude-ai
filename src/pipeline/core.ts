@@ -1,4 +1,5 @@
 import { compareDocumentClaims } from './compare.ts'
+import { relateEvidence } from './relationships.ts'
 export type SourceSegment = { id: string; anchor: string; text: string }
 export type EvidenceDocument = {
   id: string
@@ -184,6 +185,13 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
   // Review generalized cross-document claims without treating stages, revisions,
   // unsigned amendments or inconsistent labels as proven contradictions.
   for (const candidate of compareDocumentClaims(documents)) {
+    if (findings.length >= MAX_FINDINGS) break
+    findings.push(candidate)
+  }
+  // Domain-neutral record links are grounded in explicit references, never
+  // filenames or a model's assertions. They complement the existing cautious
+  // rule comparisons and do not claim verified fraud or shared ownership.
+  for (const candidate of relateEvidence(documents)) {
     if (findings.length >= MAX_FINDINGS) break
     findings.push(candidate)
   }

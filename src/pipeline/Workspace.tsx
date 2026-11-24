@@ -458,7 +458,7 @@ export default function InvestigationWorkspace() {
           <span><strong>{summary.aiEvidenceGroupCount}</strong> AI evidence groups (separate)</span>
         </div>
         <p>{summary.overview}</p>
-        {summary.findings.length ? summary.findings.map(item => <article key={item.id} className="case-detail">
+        {summary.findings.length ? summary.findings.map(item => <article key={item.id} className="case-summary-detail">
           <h3>{item.title}</h3>
           <p><strong>{item.status}</strong> · {item.explanation}</p>
           <p><strong>Context:</strong> {item.context}</p>

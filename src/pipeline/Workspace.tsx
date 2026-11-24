@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { firebaseConfigured, supportsChromeOnDevice } from '../firebase'
-import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalEvidencePlan, reportInvestigation, validateAIReview, validateLocalEvidenceSelection, inspectLocalEvidenceSelection, validatePrivacyCandidates } from './core'
+import { analyzeEvidence, findSource, makeCloudPayload, makeLocalEvidencePlan, reportInvestigation, validateAIReview, validateLocalEvidenceSelection, inspectLocalEvidenceSelection, validatePrivacyCandidates } from './core'
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
 import { analyzeWithLocalModel, analyzeWithCloudModel } from './ai'
@@ -65,7 +65,6 @@ export default function InvestigationWorkspace() {
   const [graphSource, setGraphSource] = useState('')
   const [printPreview, setPrintPreview] = useState('')
 
-  const graph = useMemo(() => investigation ? buildGraph(investigation) : null, [investigation])
   const graphView = useMemo(() => investigation ? filteredEvidenceGraph(investigation, graphScope, graphQuery, graphSource) : null, [investigation, graphScope, graphQuery, graphSource])
   const quality = useMemo(() => investigation ? evaluateEvidenceQuality(investigation) : null, [investigation])
   const privacy = useMemo(() => documents.length ? inspectPrivacy(documents) : null, [documents])
@@ -404,8 +403,8 @@ export default function InvestigationWorkspace() {
         {graphView && <div className="case-graph-map" aria-label="Interactive evidence graph">
           <svg className="case-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             {graphView.edges.map((edge, i) => {
-              const from = graph.nodes.find(node => node.id === edge.from)
-              const to = graph.nodes.find(node => node.id === edge.to)
+              const from = graphView.nodes.find(node => node.id === edge.from)
+              const to = graphView.nodes.find(node => node.id === edge.to)
               return from && to ? <line key={i} x1={from.x} y1={from.y} x2={to.x} y2={to.y}/> : null
             })}
           </svg>

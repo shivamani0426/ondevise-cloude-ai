@@ -128,6 +128,14 @@ function readRecord(document: EvidenceDocument): RecordData {
   return { document, identifiers: identifiers.slice(0, 75), fields: fields.slice(0, 100) }
 }
 
+// Let existing legacy review cues respect unambiguous explicit record IDs too.
+// No new ID parser: consume the same locally extracted, source-anchored labels.
+export function explicitRecordScopes(documents: EvidenceDocument[]): Array<{
+  docId: string; ref: string; family: string; value: string
+}> {
+  return documents.slice(0, 8).flatMap(document => readRecord(document).identifiers)
+}
+
 const compatibleFamily = (a: string, b: string) => a === b || genericFamilies.has(a) || genericFamilies.has(b)
 
 type LinkedGroup = { identifiers: Identifier[]; fields: Field[] }

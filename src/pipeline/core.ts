@@ -1,5 +1,6 @@
 import { compareDocumentClaims } from './compare.ts'
 import { relateEvidence, linkedReferenceEntities } from './relationships.ts'
+import { buildInvestigationSummary } from './summary.ts'
 export type SourceSegment = { id: string; anchor: string; text: string }
 export type EvidenceDocument = {
   id: string
@@ -757,6 +758,19 @@ export function reportInvestigation(investigation: Investigation, suggestions: s
     lines.push(doc.id + ' | ' + doc.format + ' | ' + doc.segments.length + ' excerpts')
     for (const warning of doc.warnings) lines.push('  WARNING: ' + safe(warning))
   }
+  const summary = buildInvestigationSummary(investigation)
+  lines.push('', 'INVESTIGATION SUMMARY', 'Status: ' + summary.status,
+    'Sources: ' + summary.sourceCount + ' | Entities: ' + summary.entityCount +
+    ' | Source-linked rule findings: ' + summary.ruleFindingCount +
+    ' | AI evidence-selection groups (not confirmed findings): ' + summary.aiEvidenceGroupCount,
+    safe(summary.overview))
+  for (const item of summary.findings) {
+    lines.push('', safe(item.title) + ' [' + item.status + ']', safe(item.explanation),
+      'Context: ' + safe(item.context), 'Next check: ' + safe(item.nextStep))
+    for (const compared of item.compared) lines.push('  Extracted: ' + compared.ref + ' | ' + safe(compared.field) + ': ' + safe(compared.value))
+    for (const citation of item.citations) lines.push('  Citation: ' + citation.ref + ' | ' + citation.anchor)
+  }
+  for (const limitation of summary.limitations) lines.push('Limitation: ' + safe(limitation))
   lines.push('', 'FINDINGS')
   for (const finding of investigation.findings) {
     lines.push('', safe(finding.title) + ' [' + finding.status + '; ' + finding.origin + ']',

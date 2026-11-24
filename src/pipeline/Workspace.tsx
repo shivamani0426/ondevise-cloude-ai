@@ -121,12 +121,13 @@ export default function InvestigationWorkspace() {
     if (!busy) chooseFiles(Array.from(event.dataTransfer.files))
   }
 
-  async function quickAnalyze() {
-    if (busy || !files.length) return
+  async function quickAnalyze(inputFiles: File[] = files) {
+    if (busy || !inputFiles.length) return
     setBusy('extract')
     setError('')
     try {
-      const extracted = await extractLocalFiles(files, setStatus)
+      validateFileSelection(inputFiles)
+      const extracted = await extractLocalFiles(inputFiles, setStatus)
       const result = analyzeEvidence(extracted)
       setDocuments(extracted)
       setFiles([])
@@ -403,10 +404,18 @@ export default function InvestigationWorkspace() {
         {files.length > 0 && <div className="upload-selection"><strong>Selected for local extraction:</strong>{files.map((file, i) => <span key={i}>{file.name} · {describeSize(file.size)}</span>)}</div>}
         <div className="case-actions">
           {viewMode === 'simple'
-            ? <button className="primary-action case-quick-primary" type="button" disabled={!files.length || Boolean(busy)} onClick={quickAnalyze}>{busy === 'extract' ? 'Analyzing locally…' : 'Analyze these documents'}</button>
+            ? <button className="primary-action case-quick-primary" type="button" disabled={!files.length || Boolean(busy)} onClick={() => void quickAnalyze()}>{busy === 'extract' ? 'Analyzing locally…' : 'Analyze these documents'}</button>
             : <button className="primary-action" type="button" disabled={!files.length || Boolean(busy)} onClick={extract}>{busy === 'extract' ? 'Extracting on device…' : 'Extract selected files locally'}</button>}
           <button className="outline-action" type="button" onClick={clearAll} disabled={Boolean(busy)}>Clear case from memory</button>
         </div>
+        {viewMode === 'simple' && !files.length && !investigation && <div className="case-demo-option">
+          <p>No documents handy? Try a fictional support-ticket update first.</p>
+          <button type="button" className="case-view-switch" disabled={Boolean(busy)}
+            onClick={() => void quickAnalyze([
+              new File(['Case ID: CASE-2027-9999\nstatus: open'], 'support_ticket_open.txt', { type: 'text/plain' }),
+              new File(['Case ID: CASE-2027-9999\nstatus: closed'], 'support_ticket_update.md', { type: 'text/markdown' }),
+            ])}>Try a sample case</button>
+        </div>}
         <p className="case-status" role="status">{status}</p>
         {error && <p className="case-error" role="alert">{error}</p>}
       </section>

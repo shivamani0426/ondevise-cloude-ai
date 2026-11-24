@@ -64,6 +64,7 @@ export default function InvestigationWorkspace() {
   const [graphQuery, setGraphQuery] = useState('')
   const [graphSource, setGraphSource] = useState('')
   const [printPreview, setPrintPreview] = useState('')
+  const [viewMode, setViewMode] = useState<'simple' | 'advanced'>('simple')
 
   const graphView = useMemo(() => investigation ? filteredEvidenceGraph(investigation, graphScope, graphQuery, graphSource) : null, [investigation, graphScope, graphQuery, graphSource])
   const quality = useMemo(() => investigation ? evaluateEvidenceQuality(investigation) : null, [investigation])
@@ -116,6 +117,46 @@ export default function InvestigationWorkspace() {
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
     if (!busy) chooseFiles(Array.from(event.dataTransfer.files))
+  }
+
+  async function quickAnalyze() {
+    if (busy || !files.length) return
+    setBusy('extract')
+    setError('')
+    try {
+      const extracted = await extractLocalFiles(files, setStatus)
+      const result = analyzeEvidence(extracted)
+      setDocuments(extracted)
+      setFiles([])
+      setInvestigation(result)
+      setSelectedRef(extracted[0]?.segments[0] ? extracted[0].id + ':' + extracted[0].segments[0].id : '')
+      setSelectedFinding(result.findings[0]?.id || '')
+      setReviewHistory([])
+      setReviewReason('')
+      setReviewError('')
+      setLocalStatus('')
+      setLocalRaw('')
+      setLocalSensitive([])
+      setLocalAttempted(false)
+      setCloudPayload('')
+      setCloudStatus('')
+      setCloudAttempted(false)
+      setSparkConfirmed(false)
+      setPayloadApproved(false)
+      setPrivacyReviewed(false)
+      setPrintPreview('')
+      setGraphScope('all')
+      setGraphQuery('')
+      setGraphSource('')
+      setStatus('Local extraction complete. Reviewed ' + extracted.length + ' source(s) using local rules. Nothing was uploaded to AI.')
+    } catch (reason) {
+      setDocuments([])
+      setInvestigation(null)
+      setStatus('Analysis did not complete. No partial findings were accepted.')
+      setError(describeError(reason))
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function extract() {
@@ -318,28 +359,48 @@ export default function InvestigationWorkspace() {
     <div className="real-workspace">
       <div className="section-heading">
         <p className="eyebrow">PRIVATE ANALYSIS WORKSPACE · REAL DOCUMENTS</p>
-        <h1>Document-to-evidence pipeline</h1>
-        <p>Extract files locally, inspect cited evidence, build a conservative graph and findings, then optionally request AI review. No account, database, or automatic upload.</p>
+        <h1>{viewMode === 'simple' ? 'Understand your documents' : 'Document-to-evidence pipeline'}</h1>
+        <p>{viewMode === 'simple'
+          ? 'Upload your documents, compare what they say, and see what needs checking. Files stay in your browser.'
+          : 'Extract locally, inspect source evidence, trace rule findings and optionally review with AI. No account, database or automatic upload.'}</p>
       </div>
 
+      <div className="case-view-toolbar">
+        <div className="case-view-intro">
+          <strong>{viewMode === 'simple' ? 'Simple review' : 'Advanced investigation'}</strong>
+          <span>{viewMode === 'simple' ? 'Everything you need to start—without the technical controls.' : 'All original evidence, graph, reconciliation and AI controls.'}</span>
+        </div>
+        <button type="button" className="case-view-switch" disabled={Boolean(busy)}
+          onClick={() => setViewMode(current => current === 'simple' ? 'advanced' : 'simple')}>
+          {viewMode === 'simple' ? 'Show advanced tools' : 'Use simple view'}
+        </button>
+      </div>
       <div className="case-steps" aria-label="Pipeline progress">
-        <span className={documents.length ? 'done' : 'active'}>1 · Ingest</span>
-        <span className={investigation ? 'done' : documents.length ? 'active' : ''}>2 · Analyze</span>
-        <span className={investigation ? 'active' : ''}>3 · Trace findings</span>
-        <span className={cloudAttempted ? 'done' : ''}>4 · Optional AI</span>
+        {viewMode === 'simple' ? <>
+          <span className={investigation ? 'done' : 'active'}>1 · Upload &amp; analyze</span>
+          <span className={investigation ? 'active' : ''}>2 · Understand results</span>
+          <span className={investigation ? 'active' : ''}>3 · Save a report</span>
+        </> : <>
+          <span className={documents.length ? 'done' : 'active'}>1 · Ingest</span>
+          <span className={investigation ? 'done' : documents.length ? 'active' : ''}>2 · Analyze</span>
+          <span className={investigation ? 'active' : ''}>3 · Trace findings</span>
+          <span className={cloudAttempted ? 'done' : ''}>4 · Optional AI</span>
+        </>}
       </div>
 
       <section className="case-panel" aria-labelledby="upload-title">
-        <div className="case-panel-top"><h2 id="upload-title">1. Ingest original documents</h2><span className="case-tag">Browser only</span></div>
+        <div className="case-panel-top"><h2 id="upload-title">{viewMode === 'simple' ? '1. Choose files to compare' : '1. Ingest original documents'}</h2><span className="case-tag">Browser only</span></div>
         <div className="upload-drop" onDragOver={event => event.preventDefault()} onDrop={onDrop}>
           <label htmlFor="evidence-upload" className="upload-label">Choose documents or drop them here</label>
           <input id="evidence-upload" type="file" multiple accept={acceptedFileTypes} onChange={onFileInput} disabled={Boolean(busy)}/>
-          <p>PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPEG. Up to {MAX_FILES} files, {Math.round(MAX_FILE_BYTES / 1024 / 1024)} MiB each (24 MiB combined).</p>
-          <p>Scanned PDFs and images use local OCR. OCR language assets may be downloaded; document pixels are not uploaded. Unreadable excerpts are clearly marked for manual correction; failed file parsing is not silently skipped.</p>
+          <p>{viewMode === 'simple' ? 'Use two related documents to compare their details. PDF, Word, text, CSV, JSON and images are supported.' : 'PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPEG. Up to ' + MAX_FILES + ' files, ' + Math.round(MAX_FILE_BYTES / 1024 / 1024) + ' MiB each (24 MiB combined).'}</p>
+          {viewMode === 'advanced' && <p>Scanned PDFs and images use local OCR. OCR language assets may be downloaded; document pixels are not uploaded. Unreadable excerpts are clearly marked for manual correction; failed file parsing is not silently skipped.</p>}
         </div>
         {files.length > 0 && <div className="upload-selection"><strong>Selected for local extraction:</strong>{files.map((file, i) => <span key={i}>{file.name} · {describeSize(file.size)}</span>)}</div>}
         <div className="case-actions">
-          <button className="primary-action" type="button" disabled={!files.length || Boolean(busy)} onClick={extract}>{busy === 'extract' ? 'Extracting on device…' : 'Extract selected files locally'}</button>
+          {viewMode === 'simple'
+            ? <button className="primary-action case-quick-primary" type="button" disabled={!files.length || Boolean(busy)} onClick={quickAnalyze}>{busy === 'extract' ? 'Analyzing locally…' : 'Analyze these documents'}</button>
+            : <button className="primary-action" type="button" disabled={!files.length || Boolean(busy)} onClick={extract}>{busy === 'extract' ? 'Extracting on device…' : 'Extract selected files locally'}</button>}
           <button className="outline-action" type="button" onClick={clearAll} disabled={Boolean(busy)}>Clear case from memory</button>
         </div>
         <p className="case-status" role="status">{status}</p>

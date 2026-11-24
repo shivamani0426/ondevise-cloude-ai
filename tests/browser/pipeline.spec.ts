@@ -7,6 +7,7 @@ const txt = (name: string, text: string) => ({ name, mimeType: 'text/plain', buf
 async function openWorkspace(page: import('@playwright/test').Page) {
   await page.goto('/')
   await page.getByRole('button', { name: 'Analyze Documents' }).click()
+  await page.getByRole('button', { name: 'Show advanced tools' }).click()
   await expect(page.getByRole('heading', { name: 'Document-to-evidence pipeline' })).toBeVisible()
 }
 

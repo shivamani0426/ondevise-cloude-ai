@@ -1,10 +1,18 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { firebaseConfigured, supportsChromeOnDevice } from '../firebase'
-import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalEvidencePlan, reportInvestigation, validateAIReview, validateLocalEvidenceSelection, inspectLocalEvidenceSelection, validatePrivacyCandidates, validateApprovedCloudPayload } from './core'
+import { analyzeEvidence, findSource, makeCloudPayload, makeLocalEvidencePlan, reportInvestigation, validateAIReview, validateLocalEvidenceSelection, inspectLocalEvidenceSelection, validatePrivacyCandidates } from './core'
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
 import { analyzeWithLocalModel, analyzeWithCloudModel } from './ai'
+import { buildInvestigationSummary } from './summary'
+import { evaluateEvidenceQuality } from './quality'
+import { recordReview, currentReviews, explainDecision } from './reconciliation'
+import type { ReviewDecision, ReviewEvent } from './reconciliation'
+import { inspectPrivacy, cloudPrivacyGate } from './privacy'
+import { filteredEvidenceGraph } from './graph-review'
+import type { GraphScope } from './graph-review'
+import { buildCaseExport, makeRedactedCaseJson } from './reports'
 import './workspace.css'
 
 type Busy = 'extract' | 'local' | 'cloud' | null
@@ -47,11 +55,25 @@ export default function InvestigationWorkspace() {
   const [cloudAttempted, setCloudAttempted] = useState(false)
   const [localAttempted, setLocalAttempted] = useState(false)
   const [localSensitive, setLocalSensitive] = useState<string[]>([])
+  const [reviewHistory, setReviewHistory] = useState<ReviewEvent[]>([])
+  const [reviewDecision, setReviewDecision] = useState<ReviewDecision>('unresolved')
+  const [reviewReason, setReviewReason] = useState('')
+  const [reviewError, setReviewError] = useState('')
+  const [privacyReviewed, setPrivacyReviewed] = useState(false)
+  const [graphScope, setGraphScope] = useState<GraphScope>('all')
+  const [graphQuery, setGraphQuery] = useState('')
+  const [graphSource, setGraphSource] = useState('')
+  const [printPreview, setPrintPreview] = useState('')
 
-  const graph = useMemo(() => investigation ? buildGraph(investigation) : null, [investigation])
+  const graphView = useMemo(() => investigation ? filteredEvidenceGraph(investigation, graphScope, graphQuery, graphSource) : null, [investigation, graphScope, graphQuery, graphSource])
+  const quality = useMemo(() => investigation ? evaluateEvidenceQuality(investigation) : null, [investigation])
+  const privacy = useMemo(() => documents.length ? inspectPrivacy(documents) : null, [documents])
+  const reviews = useMemo(() => investigation ? currentReviews(investigation, reviewHistory) : [], [investigation, reviewHistory])
+  const exportData = useMemo(() => investigation ? buildCaseExport(investigation, reviewHistory, localSensitive) : null, [investigation, reviewHistory, localSensitive])
+  const summary = useMemo(() => investigation ? buildInvestigationSummary(investigation) : null, [investigation])
   const detail = investigation?.findings.find(finding => finding.id === selectedFinding)
   const excerpt = findSource(documents, selectedRef)
-  const cloudValidationError = cloudPayload ? validateApprovedCloudPayload(cloudPayload, documents) : null
+  const cloudValidationError = cloudPayload ? cloudPrivacyGate(cloudPayload, documents, privacyReviewed) : null
 
   function chooseFiles(next: File[]) {
     if (busy) return
@@ -60,6 +82,11 @@ export default function InvestigationWorkspace() {
       setFiles(next)
       setDocuments([])
       setInvestigation(null)
+      setReviewHistory([])
+      setReviewReason('')
+      setReviewError('')
+      setPrintPreview('')
+      setPrivacyReviewed(false)
       setSelectedRef('')
       setSelectedFinding('')
       setEditingRef('')
@@ -100,6 +127,8 @@ export default function InvestigationWorkspace() {
       setDocuments(extracted)
       setFiles([])
       setInvestigation(null)
+      setReviewHistory([])
+      setPrintPreview('')
       setSelectedRef(extracted[0].id + ':' + extracted[0].segments[0].id)
       setStatus('Local extraction complete. ' + extracted.length + ' file(s), ' +
         extracted.reduce((sum, document) => sum + document.segments.length, 0) + ' anchored excerpts.')
@@ -121,6 +150,10 @@ export default function InvestigationWorkspace() {
     setDocuments(previous => previous.map(doc => ({ ...doc, segments: doc.segments.map(segment =>
       doc.id + ':' + segment.id === editingRef ? { ...segment, text: editedText.trim() } : segment) })))
     setInvestigation(null)
+    setReviewHistory([])
+    setReviewReason('')
+    setPrintPreview('')
+    setPrivacyReviewed(false)
     setSelectedFinding('')
     setEditingRef('')
     setEditedText('')
@@ -139,6 +172,10 @@ export default function InvestigationWorkspace() {
     if (busy || !documents.length) return
     const result = analyzeEvidence(documents)
     setInvestigation(result)
+    setReviewHistory([])
+    setReviewReason('')
+    setReviewError('')
+    setPrintPreview('')
     setSelectedFinding(result.findings[0]?.id || '')
     setLocalStatus('')
     setLocalRaw('')
@@ -172,6 +209,8 @@ export default function InvestigationWorkspace() {
       // Any earlier cloud preview was built without these newly approved local
       // privacy suggestions. Invalidate its contents and prior consent.
       setCloudPayload('')
+      setPrintPreview('')
+      setPrivacyReviewed(false)
       setPayloadApproved(false)
       setSparkConfirmed(false)
       setCloudStatus('Local review finished. Prepare a new redacted cloud preview if you want an optional cloud analysis.')
@@ -195,6 +234,7 @@ export default function InvestigationWorkspace() {
       return
     }
     setCloudPayload(prepared.payload)
+    setPrivacyReviewed(false)
     setRedactions(prepared.redactions)
     setRedactionTypes(prepared.categories)
     setIncluded(prepared.included)
@@ -238,6 +278,14 @@ export default function InvestigationWorkspace() {
     setLocalRaw('')
     setCloudStatus('')
     setCloudPayload('')
+    setPrivacyReviewed(false)
+    setReviewHistory([])
+    setReviewReason('')
+    setReviewError('')
+    setGraphScope('all')
+    setGraphQuery('')
+    setGraphSource('')
+    setPrintPreview('')
     setSparkConfirmed(false)
     setPayloadApproved(false)
     setCloudAttempted(false)
@@ -248,6 +296,17 @@ export default function InvestigationWorkspace() {
     setIncluded(0)
     setError('')
     setStatus('Case cleared from page memory. The browser has not saved your documents.')
+  }
+
+  function submitReview() {
+    if (!investigation || busy) return
+    try {
+      const next = recordReview(investigation, reviewHistory, selectedFinding, reviewDecision, reviewReason)
+      setReviewHistory(next)
+      setReviewReason('')
+      setReviewError('')
+      setPrintPreview('')
+    } catch (reason) { setReviewError(describeError(reason)) }
   }
 
   function selectFinding(finding: CaseFinding) {
@@ -323,15 +382,33 @@ export default function InvestigationWorkspace() {
         <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} {investigation.entities.length === 1 ? 'entity' : 'entities'} · {investigation.findings.length} {investigation.findings.length === 1 ? 'finding' : 'findings'}</span></div>
         <p>Rule-based findings compare evidence across document categories, including explicit shared record references and differences in the same labelled field. Matching reference strings do NOT establish the same real-world event, authenticity or fraud. Different process stages or unsigned revisions require manual review. AI can only select literal quotations from extracted sources.</p>
 
-        {graph && <div className="case-graph-map" aria-label="Interactive evidence graph">
+        <div className="case-graph-tools" aria-label="Graph filters">
+          <label htmlFor="graph-view-scope">Link type
+            <select id="graph-view-scope" value={graphScope} onChange={event => setGraphScope(event.target.value as GraphScope)}>
+              <option value="all">All traced links</option><option value="rules">Rule findings</option>
+              <option value="ai">AI evidence selections</option>
+            </select>
+          </label>
+          <label htmlFor="graph-source-filter">Trace one source
+            <select id="graph-source-filter" value={graphSource} onChange={event => setGraphSource(event.target.value)}>
+              <option value="">All sources</option>
+              {documents.map(doc => <option key={doc.id} value={doc.id}>{doc.id}</option>)}
+            </select>
+          </label>
+          <label htmlFor="graph-search">Search visible labels
+            <input id="graph-search" value={graphQuery} maxLength={80} placeholder="Reference or finding" onChange={event => setGraphQuery(event.target.value)}/>
+          </label>
+        </div>
+        <p className="case-caution">Graph edges mean extracted source references, rule associations or AI-selected review cues—not authenticated real-world relationships.</p>
+        {graphView && <div className="case-graph-map" aria-label="Interactive evidence graph">
           <svg className="case-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {graph.edges.map((edge, i) => {
-              const from = graph.nodes.find(node => node.id === edge.from)
-              const to = graph.nodes.find(node => node.id === edge.to)
+            {graphView.edges.map((edge, i) => {
+              const from = graphView.nodes.find(node => node.id === edge.from)
+              const to = graphView.nodes.find(node => node.id === edge.to)
               return from && to ? <line key={i} x1={from.x} y1={from.y} x2={to.x} y2={to.y}/> : null
             })}
           </svg>
-          {graph.nodes.map(node => <button key={node.id} type="button" className={'case-graph-node ' + node.kind}
+          {graphView.nodes.map(node => <button key={node.id} type="button" className={'case-graph-node ' + node.kind}
             style={{ left: node.x + '%', top: node.y + '%' }}
             title={node.label}
             onClick={() => {
@@ -349,6 +426,14 @@ export default function InvestigationWorkspace() {
           <div className="case-graph-caption">Sources → Entities → Findings</div>
         </div>}
         <p className="case-caution">Accessible alternative: all graph relationships can be followed in the findings and cited excerpts below.</p>
+        {graphView && <details className="case-explanation">
+          <summary>Trace {graphView.edges.length} grounded graph links</summary>
+          <ul className="case-trace-list">{graphView.edges.map((edge, index) => {
+            const from = graphView.nodes.find(node => node.id === edge.from)
+            const to = graphView.nodes.find(node => node.id === edge.to)
+            return <li key={edge.from + ':' + edge.to + ':' + index}>{from?.label} → {to?.label} · {edge.basis}</li>
+          })}</ul>
+        </details>}
         <div className="case-findings">
           {investigation.findings.map(finding => <button key={finding.id} type="button"
             className={'case-finding ' + (selectedFinding === finding.id ? 'chosen' : '')}
@@ -403,6 +488,12 @@ export default function InvestigationWorkspace() {
         <div className="case-panel-top"><h2 id="ai-review-title">4. Optional hybrid AI review</h2><span className="case-tag">Explicit actions only</span></div>
         <p>On-device evidence selection remains local and source-verifiable. Gemini cloud access is currently restricted for this project; do not assume the optional cloud route works. Source authenticity and interpretation still require human review.</p>
 
+        {privacy && <div className="case-privacy-audit">
+          <h3>Pipeline 12 · Privacy readiness</h3>
+          <p>Local scan found {privacy.detectedOccurrences} recognizable sensitive-pattern occurrence(s) across {privacy.sourceCount} source(s). This count is not a guarantee of complete masking.</p>
+          <p><strong>Detected categories:</strong> {privacy.detectedCategories.join(', ') || 'None detected by current patterns'}</p>
+          <details><summary>Privacy limitations and controls</summary><ul>{privacy.warnings.map(warning=><li key={warning}>{warning}</li>)}</ul></details>
+        </div>}
         <div className="case-model-section">
           <h3>A. On-device Firebase AI Logic</h3>
           <p>Uses Chrome's local model. To reduce CPU/GPU load, it receives up to six numbered, source-grounded quotation choices (maximum 2,400 prompt characters). The model returns choice IDs, not newly written quotations. PhantomGraph independently checks each ID and the original source text. For cases with a multi-source rule finding, the choices focus on its cited evidence; model selections still do not establish relevance or truth. The full rule-based investigation examines all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no cloud fallback.</p>
@@ -428,18 +519,100 @@ export default function InvestigationWorkspace() {
             <p className="case-caution">Preview includes {included} anchored excerpts and {redactions} automatic redactions{redactionTypes.length ? ' (' + redactionTypes.join(', ') + ')' : ''}. The source filenames are excluded. Check for names, addresses, financial identifiers, secrets and anything you do not want to transmit.</p>
             <label className="case-editor-label" htmlFor="approved-cloud-payload">Exact cloud request text (editable)</label>
             <textarea id="approved-cloud-payload" className="case-payload" value={cloudPayload} rows={12} maxLength={16000}
-              onChange={event => { setCloudPayload(event.target.value); setPayloadApproved(false); setCloudStatus('Preview changed. Review and approve again before sending.') }}
+              onChange={event => { setCloudPayload(event.target.value); setPayloadApproved(false); setPrivacyReviewed(false); setSparkConfirmed(false); setCloudStatus('Preview changed. Review and approve again before sending.') }}
               disabled={Boolean(busy) || cloudAttempted} spellCheck={false}/>
             {cloudValidationError && <p className="case-error" role="alert">Cloud payload blocked: {cloudValidationError}</p>}
+            <label className="case-checkbox"><input type="checkbox" checked={privacyReviewed} disabled={Boolean(busy) || cloudAttempted}
+              onChange={event => setPrivacyReviewed(event.target.checked)}/> I independently inspected the exact payload for names, addresses, secret values, and private context that automated masking may miss.</label>
             <label className="case-checkbox"><input type="checkbox" checked={sparkConfirmed} disabled={Boolean(busy) || cloudAttempted}
               onChange={event => setSparkConfirmed(event.target.checked)}/> I verified Firebase Spark (free) and that no billing account is linked.</label>
             <label className="case-checkbox"><input type="checkbox" checked={payloadApproved} disabled={Boolean(busy) || cloudAttempted}
               onChange={event => setPayloadApproved(event.target.checked)}/> I reviewed every character above and explicitly approve sending only this text to Gemini Developer API.</label>
             <button className="primary-action" type="button"
-              disabled={Boolean(busy) || cloudAttempted || !firebaseConfigured || !sparkConfirmed || !payloadApproved || Boolean(cloudValidationError)}
+              disabled={Boolean(busy) || cloudAttempted || !firebaseConfigured || !sparkConfirmed || !privacyReviewed || !payloadApproved || Boolean(cloudValidationError)}
               onClick={cloudReview}>{busy === 'cloud' ? 'Sending approved request…' : cloudAttempted ? 'Cloud request attempted (no automatic retry)' : 'Send this exact approved payload once'}</button>
           </>}
           {cloudStatus && <p className="case-status" role="status">{cloudStatus}</p>}
+        </div>
+      </section>}
+
+      {summary && <section className="case-panel case-summary" aria-labelledby="summary-title">
+        <div className="case-panel-top">
+          <h2 id="summary-title">Investigation summary</h2>
+          <span className="case-tag">{summary.status}</span>
+        </div>
+        <p className="case-caution">Local, source-grounded synthesis. No new AI claims, cloud request, authenticity assessment, or fraud verdict.</p>
+        <div className="case-summary-metrics">
+          <span><strong>{summary.sourceCount}</strong> sources</span>
+          <span><strong>{summary.entityCount}</strong> entities</span>
+          <span><strong>{summary.ruleFindingCount}</strong> rule findings</span>
+          <span><strong>{summary.aiEvidenceGroupCount}</strong> AI evidence groups (separate)</span>
+        </div>
+        <p>{summary.overview}</p>
+        {summary.findings.length ? summary.findings.map(item => <article key={item.id} className="case-summary-detail">
+          <h3>{item.title}</h3>
+          <p><strong>{item.status}</strong> · {item.explanation}</p>
+          <p><strong>Context:</strong> {item.context}</p>
+          {item.compared.length > 0 && <div className="case-summary-values">
+            {item.compared.map((claim, index) => <button key={claim.ref + ':' + index} className="inline-link" type="button" onClick={() => setSelectedRef(claim.ref)}>
+              Extracted {claim.field}: {claim.value}
+            </button>)}
+          </div>}
+          <p><strong>Verification step:</strong> {item.nextStep}</p>
+          <div className="case-summary-citations">{item.citations.map(citation =>
+            <button key={citation.ref} className="inline-link" type="button" onClick={() => setSelectedRef(citation.ref)}>
+              {citation.documentId} · {citation.anchor}
+            </button>)}</div>
+        </article>) : <p>No source-linked rule findings were detected. This does not establish that the documents are reliable.</p>}
+        <details className="case-explanation"><summary>Investigation limitations</summary>
+          <ul>{summary.limitations.map(limit => <li key={limit}>{limit}</li>)}</ul>
+        </details>
+      </section>}
+
+      {quality && <section className="case-panel" aria-labelledby="quality-title">
+        <div className="case-panel-top"><h2 id="quality-title">Pipeline 10 · Evidence quality and confidence</h2><span className="case-tag">No fraud score</span></div>
+        <p className="case-caution">Quality labels describe extracted evidence completeness and citation coverage, not the probability of fraud or correctness.</p>
+        <p>{quality.coveredSourceCount} of {quality.totalSourceCount} sources have an excerpt cited by a current finding.</p>
+        <div className="case-quality-list">
+          {quality.sources.map(source=><article key={source.id} className="case-quality-item">
+            <strong>{source.id} · {source.format} · {source.level}</strong>
+            <p>{source.excerpts} excerpts · {source.citedExcerpts} cited excerpts</p>
+            {source.notes.map(note=><p className="case-caution" key={note}>{note}</p>)}
+          </article>)}
+        </div>
+        {quality.findings.map(finding=><details key={finding.id} className="case-explanation">
+          <summary>{finding.title} · {finding.level}</summary>
+          <p>{finding.citedSources} distinct source(s) · {finding.citedExcerpts} citation(s)</p>
+          <ul>{finding.notes.map(note=><li key={note}>{note}</li>)}</ul>
+        </details>)}
+      </section>}
+
+      {investigation && <section className="case-panel" aria-labelledby="reconcile-title">
+        <div className="case-panel-top"><h2 id="reconcile-title">Pipeline 11 · Reconciliation workspace</h2><span className="case-tag">{reviews.length} reviewed finding(s)</span></div>
+        <p className="case-caution">Decisions are user-reported and retained only in page memory. “Verified” means an investigator claims external verification; PhantomGraph does not authenticate records.</p>
+        <label className="case-editor-label" htmlFor="review-finding">Rule-based finding to review</label>
+        <select id="review-finding" className="case-control" value={investigation.findings.some(f=>f.id===selectedFinding && f.origin==='rules') ? selectedFinding : ''}
+          onChange={event => setSelectedFinding(event.target.value)}>
+          <option value="">Choose a rule finding</option>
+          {investigation.findings.filter(f=>f.origin==='rules' && f.title!=='No rule-matched concern found').map(f=><option key={f.id} value={f.id}>{f.title}</option>)}
+        </select>
+        <label className="case-editor-label" htmlFor="review-decision">Investigator disposition</label>
+        <select id="review-decision" className="case-control" value={reviewDecision} onChange={event => setReviewDecision(event.target.value as ReviewDecision)}>
+          <option value="unresolved">Unresolved</option><option value="explained">Explained by investigator</option>
+          <option value="verified">Externally verified by investigator</option><option value="dismissed">Dismissed by investigator</option>
+        </select>
+        <label className="case-editor-label" htmlFor="review-reason">Reason and original-record verification steps (required)</label>
+        <textarea id="review-reason" className="case-payload" rows={3} maxLength={500} value={reviewReason}
+          onChange={event=>setReviewReason(event.target.value)} placeholder="Describe which originals or amendments you inspected and what remains uncertain."/>
+        <button className="primary-action" type="button" disabled={Boolean(busy) || !selectedFinding || !investigation.findings.some(f=>f.id===selectedFinding && f.origin==='rules' && f.title!=='No rule-matched concern found') || reviewReason.trim().length<12}
+          onClick={submitReview}>Record investigator decision locally</button>
+        {reviewError && <p className="case-error" role="alert">{reviewError}</p>}
+        <div className="case-review-history" aria-label="Investigator decision history">
+          {reviewHistory.length ? reviewHistory.map(event=><article key={event.sequence} className="case-quality-item">
+            <strong>#{event.sequence} · {event.findingId} · {event.decision}</strong>
+            <p>{event.recordedAt} · {event.reason}</p>
+            <p className="case-caution">{explainDecision(event.decision)} Cited anchors: {event.sourceRefs.join(', ')}</p>
+          </article>) : <p>No manual reconciliation decisions have been recorded.</p>}
         </div>
       </section>}
 
@@ -448,8 +621,21 @@ export default function InvestigationWorkspace() {
         <p>Download a redacted local text report with document IDs, findings and source anchors. Original filenames are omitted. Automatic masking is incomplete, so read the report before sharing.</p>
         <div className="case-actions">
           <button className="primary-action" onClick={() => saveText('phantomgraph-redacted-report.txt', reportInvestigation(investigation, localSensitive))} disabled={Boolean(busy)}>Download redacted investigation report</button>
+          <button className="outline-action" type="button" disabled={Boolean(busy)} onClick={()=>saveText('phantomgraph-structured-investigation.json', makeRedactedCaseJson(investigation, reviewHistory, localSensitive), 'application/json;charset=utf-8')}>Download structured JSON case report</button>
+          <button className="outline-action" type="button" disabled={Boolean(busy)} onClick={()=>setPrintPreview(exportData?.redactedReport || '')}>Prepare privacy-reviewed PDF preview</button>
           <button className="outline-action" onClick={clearAll} disabled={Boolean(busy)}>Clear case from memory</button>
         </div>
+        {printPreview && <div className="case-report-preview">
+          <h3>Pipeline 14 · Print / Save as PDF</h3>
+          <p className="case-caution">Inspect this entire redacted preview before printing. The browser Print dialog can save it as PDF. No report is uploaded and automatic masking remains incomplete.</p>
+          <pre className="case-report-text">{printPreview}</pre>
+          <button className="primary-action" type="button" onClick={()=>window.print()}>Print / Save as PDF</button>
+          <button className="outline-action" type="button" onClick={()=>setPrintPreview('')}>Close preview</button>
+        </div>}
+      </section>}
+      {printPreview && <section className="case-print-document" aria-label="Printable privacy-reviewed investigation report">
+        <h1>PhantomGraph AI · Local investigation report</h1>
+        <pre>{printPreview}</pre>
       </section>}
       <p className="case-disclaimer">PhantomGraph is an investigative aid, not a forensic identity check, legal judgment, or definitive fraud detector. No account or server-side document storage is used. Closing or refreshing this page clears the current in-memory case.</p>
     </div>

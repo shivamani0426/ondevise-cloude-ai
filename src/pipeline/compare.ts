@@ -1,4 +1,5 @@
 import type { CaseFinding, EvidenceDocument } from './core'
+import { explicitRecordScopes } from './relationships.ts'
 
 // Deterministic evidence reconciliation. Everything is derived from exact local
 // source segments, not from an external model or a particular test filename.
@@ -140,6 +141,27 @@ export function compareDocumentClaims(documents: EvidenceDocument[]): CaseFindin
   if (documents.length < 2) return []
   const findings: CaseFinding[] = []
   const evidence = hits(documents)
+  const scope = explicitRecordScopes(documents)
+  type Scoped = typeof scope
+  const explicitFor = (hit: Hit): Scoped | null => {
+    const ids = scope.filter(item => item.docId === hit.sourceId)
+    if (!ids.length) return null
+    const anchored = ids.filter(item => item.ref === hit.ref)
+    if (anchored.length) return anchored
+    // A plain line elsewhere in a *single-record* document inherits that
+    // record's identity. Multi-record pages cannot safely inherit one row ID.
+    const keys = safeUnique(ids.map(item => item.family + ':' + item.value))
+    return keys.length === 1 ? ids : []
+  }
+  const sameExplicitRecord = (a: Hit, b: Hit): boolean => {
+    const left = explicitFor(a)
+    const right = explicitFor(b)
+    if (left?.length === 0 || right?.length === 0) return false
+    // Unlabelled sources remain cautious review cues, not verified links.
+    if (!left || !right) return true
+    return left.some(x => right.some(y => x.value === y.value &&
+      (x.family === y.family || x.family === 'reference' || y.family === 'reference')))
+  }
 
   // Compare the same quantity unit at different logistics stages. A quantity
   // mismatch is NOT proof of a shortage, loss, theft or fraudulent activity.
@@ -166,7 +188,8 @@ export function compareDocumentClaims(documents: EvidenceDocument[]): CaseFindin
   // updates, scope and approvals instead of asserting legal effect.
   const cancellation = evidence.flatMap(cancellationTerms)
   const cancelPairs = cancellation.flatMap((a, i) => cancellation.slice(i+1)
-    .filter(b => a.sourceId !== b.sourceId && a.value !== b.value && a.unit === b.unit).map(b => [a, b]))
+    .filter(b => a.sourceId !== b.sourceId && a.value !== b.value && a.unit === b.unit &&
+      sameExplicitRecord(a, b)).map(b => [a, b]))
   if (cancelPairs.length) add(findings, 'Different cancellation or refund windows across sources',
     'Different time windows are mentioned for a comparable cancellation/refund term. Later revisions, conditions and signature status may determine which applies.',
     'Review full clauses, effective dates, approval/signature status and any superseding amendments.',
@@ -174,7 +197,8 @@ export function compareDocumentClaims(documents: EvidenceDocument[]): CaseFindin
 
   const activation = evidence.flatMap(activationTerms)
   const activationPairs = activation.flatMap((a, i) => activation.slice(i+1)
-    .filter(b => a.sourceId !== b.sourceId && a.value !== b.value).map(b => [a, b]))
+    .filter(b => a.sourceId !== b.sourceId && a.value !== b.value &&
+      sameExplicitRecord(a, b)).map(b => [a, b]))
   if (activationPairs.length) add(findings, 'Different activation or effective dates across sources',
     'Different sources contain distinct activation/effective dates. This may reflect a proposed or approved revision, not an established contradiction.',
     'Check which document is signed and effective. Do not compare invoice due dates with service activation dates.',
@@ -182,7 +206,8 @@ export function compareDocumentClaims(documents: EvidenceDocument[]): CaseFindin
 
   const fees = evidence.flatMap(feeMentions)
   const feePairs = fees.flatMap((a,i) => fees.slice(i+1)
-    .filter(b => a.sourceId !== b.sourceId && a.topic === b.topic && a.polarity !== b.polarity)
+    .filter(b => a.sourceId !== b.sourceId && a.topic === b.topic &&
+      a.polarity !== b.polarity && sameExplicitRecord(a, b))
     .map(b => [a,b]))
   if (feePairs.length) add(findings, 'Fee policy and billing need reconciliation',
     'A source appears to waive a named fee while another discusses charging that same fee. A later approved change or invoice context could explain this.',

@@ -250,3 +250,34 @@ test('8D: other categories and process stages still work without being labelled 
   assert.ok(result.findings.some(f=>/Quantities at different process stages/.test(f.title)))
   assert.ok(result.findings.every(f=>!/proven theft|verified fraud|criminal activity/i.test(f.title+' '+f.detail)))
 })
+
+
+test('8D: distinct contract IDs do not create cross-record effective-date findings',()=>{
+  const docs=[
+    doc(0,'TXT',['Contract ID: CNTR-2027-8111','effective_date: 2027-03-10']),
+    doc(1,'TXT',['Contract ID: CNTR-2027-8222','effective_date: 2027-04-01']),
+  ]
+  const findings=analyzeEvidence(docs).findings
+  assert.equal(title(findings,'Different activation or effective dates across sources').length,0)
+  assert.equal(title(findings,'Same reference, different recorded field values').length,0)
+})
+
+test('8D: conflicting cancellation windows on unrelated IDs do not imply one contractual discrepancy',()=>{
+  const docs=[
+    doc(0,'TXT',['Contract ID: CNTR-2027-8111','Cancellation within 30 calendar days']),
+    doc(1,'TXT',['Contract ID: CNTR-2027-8222','Cancellation within 7 calendar days']),
+  ]
+  const findings=analyzeEvidence(docs).findings
+  assert.equal(title(findings,'Different cancellation or refund windows across sources').length,0)
+})
+
+test('8D: multiple records in one source must not inherit an unrelated row identity',()=>{
+  const docs=[
+    doc(0,'CSV',['contract_id,effective_date',
+      'CNTR-2027-8111,2027-03-10','CNTR-2027-8222,2027-04-01']),
+    doc(1,'TXT',['Contract ID: CNTR-2027-8333','effective_date: 2027-04-15']),
+  ]
+  const findings=analyzeEvidence(docs).findings
+  assert.equal(title(findings,'Different activation or effective dates across sources').length,0)
+  assert.equal(title(findings,'Same reference, different recorded field values').length,0)
+})

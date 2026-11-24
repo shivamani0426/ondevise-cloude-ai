@@ -633,7 +633,7 @@ export default function InvestigationWorkspace() {
           <button className="primary-action" type="button" onClick={()=>window.print()}>Print / Save as PDF</button>
           <button className="outline-action" type="button" onClick={()=>setPrintPreview('')}>Close preview</button>
         </div>}
-      </section>
+      </section>}
       {printPreview && <section className="case-print-document" aria-label="Printable privacy-reviewed investigation report">
         <h1>PhantomGraph AI · Local investigation report</h1>
         <pre>{printPreview}</pre>

@@ -488,6 +488,12 @@ export default function InvestigationWorkspace() {
         <div className="case-panel-top"><h2 id="ai-review-title">4. Optional hybrid AI review</h2><span className="case-tag">Explicit actions only</span></div>
         <p>On-device evidence selection remains local and source-verifiable. Gemini cloud access is currently restricted for this project; do not assume the optional cloud route works. Source authenticity and interpretation still require human review.</p>
 
+        {privacy && <div className="case-privacy-audit">
+          <h3>Pipeline 12 · Privacy readiness</h3>
+          <p>Local scan found {privacy.detectedOccurrences} recognizable sensitive-pattern occurrence(s) across {privacy.sourceCount} source(s). This count is not a guarantee of complete masking.</p>
+          <p><strong>Detected categories:</strong> {privacy.detectedCategories.join(', ') || 'None detected by current patterns'}</p>
+          <details><summary>Privacy limitations and controls</summary><ul>{privacy.warnings.map(warning=><li key={warning}>{warning}</li>)}</ul></details>
+        </div>}
         <div className="case-model-section">
           <h3>A. On-device Firebase AI Logic</h3>
           <p>Uses Chrome's local model. To reduce CPU/GPU load, it receives up to six numbered, source-grounded quotation choices (maximum 2,400 prompt characters). The model returns choice IDs, not newly written quotations. PhantomGraph independently checks each ID and the original source text. For cases with a multi-source rule finding, the choices focus on its cited evidence; model selections still do not establish relevance or truth. The full rule-based investigation examines all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no cloud fallback.</p>
@@ -513,15 +519,17 @@ export default function InvestigationWorkspace() {
             <p className="case-caution">Preview includes {included} anchored excerpts and {redactions} automatic redactions{redactionTypes.length ? ' (' + redactionTypes.join(', ') + ')' : ''}. The source filenames are excluded. Check for names, addresses, financial identifiers, secrets and anything you do not want to transmit.</p>
             <label className="case-editor-label" htmlFor="approved-cloud-payload">Exact cloud request text (editable)</label>
             <textarea id="approved-cloud-payload" className="case-payload" value={cloudPayload} rows={12} maxLength={16000}
-              onChange={event => { setCloudPayload(event.target.value); setPayloadApproved(false); setCloudStatus('Preview changed. Review and approve again before sending.') }}
+              onChange={event => { setCloudPayload(event.target.value); setPayloadApproved(false); setPrivacyReviewed(false); setSparkConfirmed(false); setCloudStatus('Preview changed. Review and approve again before sending.') }}
               disabled={Boolean(busy) || cloudAttempted} spellCheck={false}/>
             {cloudValidationError && <p className="case-error" role="alert">Cloud payload blocked: {cloudValidationError}</p>}
+            <label className="case-checkbox"><input type="checkbox" checked={privacyReviewed} disabled={Boolean(busy) || cloudAttempted}
+              onChange={event => setPrivacyReviewed(event.target.checked)}/> I independently inspected the exact payload for names, addresses, secret values, and private context that automated masking may miss.</label>
             <label className="case-checkbox"><input type="checkbox" checked={sparkConfirmed} disabled={Boolean(busy) || cloudAttempted}
               onChange={event => setSparkConfirmed(event.target.checked)}/> I verified Firebase Spark (free) and that no billing account is linked.</label>
             <label className="case-checkbox"><input type="checkbox" checked={payloadApproved} disabled={Boolean(busy) || cloudAttempted}
               onChange={event => setPayloadApproved(event.target.checked)}/> I reviewed every character above and explicitly approve sending only this text to Gemini Developer API.</label>
             <button className="primary-action" type="button"
-              disabled={Boolean(busy) || cloudAttempted || !firebaseConfigured || !sparkConfirmed || !payloadApproved || Boolean(cloudValidationError)}
+              disabled={Boolean(busy) || cloudAttempted || !firebaseConfigured || !sparkConfirmed || !privacyReviewed || !payloadApproved || Boolean(cloudValidationError)}
               onClick={cloudReview}>{busy === 'cloud' ? 'Sending approved request…' : cloudAttempted ? 'Cloud request attempted (no automatic retry)' : 'Send this exact approved payload once'}</button>
           </>}
           {cloudStatus && <p className="case-status" role="status">{cloudStatus}</p>}
@@ -559,6 +567,53 @@ export default function InvestigationWorkspace() {
         <details className="case-explanation"><summary>Investigation limitations</summary>
           <ul>{summary.limitations.map(limit => <li key={limit}>{limit}</li>)}</ul>
         </details>
+      </section>}
+
+      {quality && <section className="case-panel" aria-labelledby="quality-title">
+        <div className="case-panel-top"><h2 id="quality-title">Pipeline 10 · Evidence quality and confidence</h2><span className="case-tag">No fraud score</span></div>
+        <p className="case-caution">Quality labels describe extracted evidence completeness and citation coverage, not the probability of fraud or correctness.</p>
+        <p>{quality.coveredSourceCount} of {quality.totalSourceCount} sources have an excerpt cited by a current finding.</p>
+        <div className="case-quality-list">
+          {quality.sources.map(source=><article key={source.id} className="case-quality-item">
+            <strong>{source.id} · {source.format} · {source.level}</strong>
+            <p>{source.excerpts} excerpts · {source.citedExcerpts} cited excerpts</p>
+            {source.notes.map(note=><p className="case-caution" key={note}>{note}</p>)}
+          </article>)}
+        </div>
+        {quality.findings.map(finding=><details key={finding.id} className="case-explanation">
+          <summary>{finding.title} · {finding.level}</summary>
+          <p>{finding.citedSources} distinct source(s) · {finding.citedExcerpts} citation(s)</p>
+          <ul>{finding.notes.map(note=><li key={note}>{note}</li>)}</ul>
+        </details>)}
+      </section>}
+
+      {investigation && <section className="case-panel" aria-labelledby="reconcile-title">
+        <div className="case-panel-top"><h2 id="reconcile-title">Pipeline 11 · Reconciliation workspace</h2><span className="case-tag">{reviews.length} reviewed finding(s)</span></div>
+        <p className="case-caution">Decisions are user-reported and retained only in page memory. “Verified” means an investigator claims external verification; PhantomGraph does not authenticate records.</p>
+        <label className="case-editor-label" htmlFor="review-finding">Rule-based finding to review</label>
+        <select id="review-finding" className="case-control" value={investigation.findings.some(f=>f.id===selectedFinding && f.origin==='rules') ? selectedFinding : ''}
+          onChange={event => setSelectedFinding(event.target.value)}>
+          <option value="">Choose a rule finding</option>
+          {investigation.findings.filter(f=>f.origin==='rules' && f.title!=='No rule-matched concern found').map(f=><option key={f.id} value={f.id}>{f.title}</option>)}
+        </select>
+        <label className="case-editor-label" htmlFor="review-decision">Investigator disposition</label>
+        <select id="review-decision" className="case-control" value={reviewDecision} onChange={event => setReviewDecision(event.target.value as ReviewDecision)}>
+          <option value="unresolved">Unresolved</option><option value="explained">Explained by investigator</option>
+          <option value="verified">Externally verified by investigator</option><option value="dismissed">Dismissed by investigator</option>
+        </select>
+        <label className="case-editor-label" htmlFor="review-reason">Reason and original-record verification steps (required)</label>
+        <textarea id="review-reason" className="case-payload" rows={3} maxLength={500} value={reviewReason}
+          onChange={event=>setReviewReason(event.target.value)} placeholder="Describe which originals or amendments you inspected and what remains uncertain."/>
+        <button className="primary-action" type="button" disabled={Boolean(busy) || !selectedFinding || !investigation.findings.some(f=>f.id===selectedFinding && f.origin==='rules' && f.title!=='No rule-matched concern found') || reviewReason.trim().length<12}
+          onClick={submitReview}>Record investigator decision locally</button>
+        {reviewError && <p className="case-error" role="alert">{reviewError}</p>}
+        <div className="case-review-history" aria-label="Investigator decision history">
+          {reviewHistory.length ? reviewHistory.map(event=><article key={event.sequence} className="case-quality-item">
+            <strong>#{event.sequence} · {event.findingId} · {event.decision}</strong>
+            <p>{event.recordedAt} · {event.reason}</p>
+            <p className="case-caution">{explainDecision(event.decision)} Cited anchors: {event.sourceRefs.join(', ')}</p>
+          </article>) : <p>No manual reconciliation decisions have been recorded.</p>}
+        </div>
       </section>}
 
       {investigation && <section className="case-panel" aria-labelledby="report-title">

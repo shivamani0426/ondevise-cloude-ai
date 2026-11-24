@@ -6,3 +6,6 @@
 @media(max-width:700px){.layout.real-workspace-mode .main-panel{width:100%}.case-panel{padding:15px}.case-panel-top{flex-wrap:wrap}.case-source{flex-direction:column;align-items:stretch}.case-source .outline-action{width:100%}.case-graph-map{height:440px}.case-graph-node{font-size:8px;padding:6px 4px;min-width:56px}.case-actions button{width:100%}}
 
 .case-verified-quotes{border:1px solid #39768a;background:#102c3d;padding:14px;border-radius:11px;margin:16px 0}.case-evidence-quote{margin:12px 0;padding:10px 12px;background:#071c2c;border-left:3px solid #6fddc3;border-radius:7px}.case-evidence-quote blockquote{margin:0 0 8px;color:#e6f7fc;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.65}.case-evidence-quote figcaption{font-size:12px}.case-verified-quotes strong{color:#d8f6f4}
+
+/* Pipeline 9: source-grounded summary */
+.case-summary-metrics{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.case-summary-metrics span{border:1px solid #31546a;border-radius:9px;background:#102f42;padding:10px 13px;font-size:12px;color:#c4e0e8}.case-summary-metrics strong{color:white;font-size:17px;margin-right:5px}.case-summary-values{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}.case-summary .case-detail h3{color:#e3fbfc}.case-summary .case-explanation li{color:#b2cbd9;font-size:12px;margin:6px 0;line-height:1.5}

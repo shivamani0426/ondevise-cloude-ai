@@ -11,7 +11,7 @@ async function openSimple(page: import('@playwright/test').Page) {
 test('simple first-run flow reviews fictional support ticket locally and preserves source trace', async ({ page }) => {
   const outgoing: string[] = []
   page.on('request', request => {
-    if (/generativelanguage|firebasevertexai|attacker\\.example/i.test(request.url())) outgoing.push(request.url())
+    if (/generativelanguage|firebasevertexai|attacker\.example/i.test(request.url())) outgoing.push(request.url())
   })
   await openSimple(page)
   await expect(page.locator('.case-graph-map')).toHaveCount(0)
@@ -36,8 +36,8 @@ test('simple first-run flow reviews fictional support ticket locally and preserv
 test('simple upload handles invoice difference without exposing cloud controls', async ({ page }) => {
   await openSimple(page)
   await page.locator('#evidence-upload').setInputFiles([
-    txt('invoice-a.txt', 'Invoice ID: INV-2027-0042\\namount_usd: 350\\nstatus: issued'),
-    txt('invoice-b.txt', 'Invoice ID: INV-2027-0042\\namount_usd: 450\\nstatus: issued'),
+    txt('invoice-a.txt', 'Invoice ID: INV-2027-0042\namount_usd: 350\nstatus: issued'),
+    txt('invoice-b.txt', 'Invoice ID: INV-2027-0042\namount_usd: 450\nstatus: issued'),
   ])
   await page.getByRole('button', { name: 'Analyze these documents' }).click()
   await expect(page.locator('.case-quick-finding')).toContainText('Same reference, different recorded field values')

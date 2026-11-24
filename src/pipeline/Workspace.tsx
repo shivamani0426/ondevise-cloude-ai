@@ -5,6 +5,7 @@ import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalEvi
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
 import { analyzeWithLocalModel, analyzeWithCloudModel } from './ai'
+import { buildInvestigationSummary } from './summary'
 import './workspace.css'
 
 type Busy = 'extract' | 'local' | 'cloud' | null
@@ -49,6 +50,7 @@ export default function InvestigationWorkspace() {
   const [localSensitive, setLocalSensitive] = useState<string[]>([])
 
   const graph = useMemo(() => investigation ? buildGraph(investigation) : null, [investigation])
+  const summary = useMemo(() => investigation ? buildInvestigationSummary(investigation) : null, [investigation])
   const detail = investigation?.findings.find(finding => finding.id === selectedFinding)
   const excerpt = findSource(documents, selectedRef)
   const cloudValidationError = cloudPayload ? validateApprovedCloudPayload(cloudPayload, documents) : null
@@ -441,6 +443,39 @@ export default function InvestigationWorkspace() {
           </>}
           {cloudStatus && <p className="case-status" role="status">{cloudStatus}</p>}
         </div>
+      </section>}
+
+      {summary && <section className="case-panel case-summary" aria-labelledby="summary-title">
+        <div className="case-panel-top">
+          <h2 id="summary-title">Investigation summary</h2>
+          <span className="case-tag">{summary.status}</span>
+        </div>
+        <p className="case-caution">Local, source-grounded synthesis. No new AI claims, cloud request, authenticity assessment, or fraud verdict.</p>
+        <div className="case-summary-metrics">
+          <span><strong>{summary.sourceCount}</strong> sources</span>
+          <span><strong>{summary.entityCount}</strong> entities</span>
+          <span><strong>{summary.ruleFindingCount}</strong> rule findings</span>
+          <span><strong>{summary.aiEvidenceGroupCount}</strong> AI evidence groups (separate)</span>
+        </div>
+        <p>{summary.overview}</p>
+        {summary.findings.length ? summary.findings.map(item => <article key={item.id} className="case-detail">
+          <h3>{item.title}</h3>
+          <p><strong>{item.status}</strong> · {item.explanation}</p>
+          <p><strong>Context:</strong> {item.context}</p>
+          {item.compared.length > 0 && <div className="case-summary-values">
+            {item.compared.map((claim, index) => <button key={claim.ref + ':' + index} className="inline-link" type="button" onClick={() => setSelectedRef(claim.ref)}>
+              Extracted {claim.field}: {claim.value}
+            </button>)}
+          </div>}
+          <p><strong>Verification step:</strong> {item.nextStep}</p>
+          <div className="case-citations">{item.citations.map(citation =>
+            <button key={citation.ref} className="inline-link" type="button" onClick={() => setSelectedRef(citation.ref)}>
+              {citation.documentId} · {citation.anchor}
+            </button>)}</div>
+        </article>) : <p>No source-linked rule findings were detected. This does not establish that the documents are reliable.</p>}
+        <details className="case-explanation"><summary>Investigation limitations</summary>
+          <ul>{summary.limitations.map(limit => <li key={limit}>{limit}</li>)}</ul>
+        </details>
       </section>}
 
       {investigation && <section className="case-panel" aria-labelledby="report-title">

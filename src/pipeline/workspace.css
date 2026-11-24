@@ -67,3 +67,8 @@
 .case-quick-export{background:#102838}
 .case-quick-help{font-size:12px!important;color:#aac9d1!important;margin-top:12px}
 @media(max-width:700px){.case-view-toolbar{align-items:stretch}.case-view-switch{width:100%;text-align:center}.case-quick-results h2{font-size:19px}.case-quick-finding{padding:14px}.case-quick-stats span{flex:1}.case-quick-value{flex:1;min-width:0}}
+
+.case-demo-option{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:#153444;border:1px solid #3c6875;padding:12px 16px;margin:14px 0 0;border-radius:12px}
+.case-demo-option p{margin:0;color:#d0e7e9;font-size:12px}
+.case-demo-option .case-view-switch{white-space:nowrap}
+@media(max-width:700px){.case-demo-option{align-items:stretch}.case-demo-option .case-view-switch{width:100%}}

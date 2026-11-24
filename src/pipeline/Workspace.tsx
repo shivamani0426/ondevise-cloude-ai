@@ -621,8 +621,21 @@ export default function InvestigationWorkspace() {
         <p>Download a redacted local text report with document IDs, findings and source anchors. Original filenames are omitted. Automatic masking is incomplete, so read the report before sharing.</p>
         <div className="case-actions">
           <button className="primary-action" onClick={() => saveText('phantomgraph-redacted-report.txt', reportInvestigation(investigation, localSensitive))} disabled={Boolean(busy)}>Download redacted investigation report</button>
+          <button className="outline-action" type="button" disabled={Boolean(busy)} onClick={()=>saveText('phantomgraph-structured-investigation.json', makeRedactedCaseJson(investigation, reviewHistory, localSensitive), 'application/json;charset=utf-8')}>Download structured JSON case report</button>
+          <button className="outline-action" type="button" disabled={Boolean(busy)} onClick={()=>setPrintPreview(exportData?.redactedReport || '')}>Prepare privacy-reviewed PDF preview</button>
           <button className="outline-action" onClick={clearAll} disabled={Boolean(busy)}>Clear case from memory</button>
         </div>
+        {printPreview && <div className="case-report-preview">
+          <h3>Pipeline 14 · Print / Save as PDF</h3>
+          <p className="case-caution">Inspect this entire redacted preview before printing. The browser Print dialog can save it as PDF. No report is uploaded and automatic masking remains incomplete.</p>
+          <pre className="case-report-text">{printPreview}</pre>
+          <button className="primary-action" type="button" onClick={()=>window.print()}>Print / Save as PDF</button>
+          <button className="outline-action" type="button" onClick={()=>setPrintPreview('')}>Close preview</button>
+        </div>}
+      </section>
+      {printPreview && <section className="case-print-document" aria-label="Printable privacy-reviewed investigation report">
+        <h1>PhantomGraph AI · Local investigation report</h1>
+        <pre>{printPreview}</pre>
       </section>}
       <p className="case-disclaimer">PhantomGraph is an investigative aid, not a forensic identity check, legal judgment, or definitive fraud detector. No account or server-side document storage is used. Closing or refreshing this page clears the current in-memory case.</p>
     </div>

@@ -302,7 +302,8 @@ export default function InvestigationWorkspace() {
   function submitReview() {
     if (!investigation || busy) return
     try {
-      setReviewHistory(previous => recordReview(investigation, previous, selectedFinding, reviewDecision, reviewReason))
+      const next = recordReview(investigation, reviewHistory, selectedFinding, reviewDecision, reviewReason)
+      setReviewHistory(next)
       setReviewReason('')
       setReviewError('')
       setPrintPreview('')

@@ -33,6 +33,10 @@ export function buildInvestigationSummary(investigation: Investigation): Investi
   for (const finding of investigation.findings) {
     // AI output may select quotations, but cannot create a new verified case-level claim.
     if (finding.origin !== 'rules') continue
+    // The analysis engine emits a source-linked "no match" informational
+    // fallback. It is not a concern and must never increase concern counts.
+    if (finding.title === 'No rule-matched concern found' &&
+        finding.status === 'Insufficient evidence') continue
     const citations = [...new Set(finding.refs)].flatMap(ref => {
       const source = index.get(ref)
       return source ? [{ ref, anchor: source.anchor, documentId: source.documentId }] : []

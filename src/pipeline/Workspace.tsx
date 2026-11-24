@@ -65,6 +65,7 @@ export default function InvestigationWorkspace() {
   const [graphSource, setGraphSource] = useState('')
   const [printPreview, setPrintPreview] = useState('')
   const [viewMode, setViewMode] = useState<'simple' | 'advanced'>('simple')
+  const [quickExcerptOpen, setQuickExcerptOpen] = useState(false)
 
   const graphView = useMemo(() => investigation ? filteredEvidenceGraph(investigation, graphScope, graphQuery, graphSource) : null, [investigation, graphScope, graphQuery, graphSource])
   const quality = useMemo(() => investigation ? evaluateEvidenceQuality(investigation) : null, [investigation])
@@ -89,6 +90,7 @@ export default function InvestigationWorkspace() {
       setPrintPreview('')
       setPrivacyReviewed(false)
       setSelectedRef('')
+      setQuickExcerptOpen(false)
       setSelectedFinding('')
       setEditingRef('')
       setEditedText('')
@@ -131,6 +133,7 @@ export default function InvestigationWorkspace() {
       setInvestigation(result)
       setSelectedRef(extracted[0]?.segments[0] ? extracted[0].id + ':' + extracted[0].segments[0].id : '')
       setSelectedFinding(result.findings[0]?.id || '')
+      setQuickExcerptOpen(false)
       setReviewHistory([])
       setReviewReason('')
       setReviewError('')
@@ -312,6 +315,7 @@ export default function InvestigationWorkspace() {
     setDocuments([])
     setInvestigation(null)
     setSelectedRef('')
+    setQuickExcerptOpen(false)
     setSelectedFinding('')
     setEditingRef('')
     setEditedText('')
@@ -427,7 +431,7 @@ export default function InvestigationWorkspace() {
           <p>{item.explanation}</p>
           {item.compared.length > 0 && <div className="case-quick-values">
             {item.compared.map((value, i) => <button key={value.ref + ':' + i} type="button"
-              onClick={() => setSelectedRef(value.ref)} className="case-quick-value">
+              onClick={() => { setSelectedRef(value.ref); setQuickExcerptOpen(true) }} className="case-quick-value">
               <span>{value.field}</span><strong>{value.value}</strong>
             </button>)}
           </div>}
@@ -436,17 +440,20 @@ export default function InvestigationWorkspace() {
             <summary>See the source lines ({item.citations.length})</summary>
             <div className="case-quick-links">
               {item.citations.map(citation => <button key={citation.ref} type="button" className="inline-link"
-                onClick={() => setSelectedRef(citation.ref)}>{citation.documentId} · {citation.anchor}</button>)}
+                onClick={() => { setSelectedRef(citation.ref); setQuickExcerptOpen(true) }}>{citation.documentId} · {citation.anchor}</button>)}
             </div>
           </details>
         </article>)}
-        <details className="case-quick-source">
-          <summary>View original extracted text{excerpt ? ' · ' + excerpt.document.name : ''}</summary>
-          {excerpt ? <>
+        <div className="case-quick-source">
+          <button type="button" className="case-view-switch" onClick={() => setQuickExcerptOpen(open => !open)}>
+            {quickExcerptOpen ? 'Hide extracted text' : 'Read an extracted source line'}
+          </button>
+          {quickExcerptOpen && excerpt && <div className="case-quick-excerpt">
             <p><strong>{excerpt.document.name}</strong> · {excerpt.segment.anchor}</p>
             <blockquote>{excerpt.segment.text}</blockquote>
-          </> : <p>Choose a source citation above to inspect its extracted text.</p>}
-        </details>
+            <p className="case-caution">This is locally extracted text, not an authenticated original. Check the source document before relying on it.</p>
+          </div>}
+        </div>
         {quality && <p className="case-quick-quality">Evidence coverage: {quality.coveredSourceCount} of {quality.totalSourceCount} source(s) cited by findings. Extraction can miss context, formatting and signatures.</p>}
         <details className="case-quick-source">
           <summary>Important limitations</summary>

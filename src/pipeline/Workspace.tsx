@@ -1,11 +1,18 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { firebaseConfigured, supportsChromeOnDevice } from '../firebase'
-import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalEvidencePlan, reportInvestigation, validateAIReview, validateLocalEvidenceSelection, inspectLocalEvidenceSelection, validatePrivacyCandidates, validateApprovedCloudPayload } from './core'
+import { analyzeEvidence, buildGraph, findSource, makeCloudPayload, makeLocalEvidencePlan, reportInvestigation, validateAIReview, validateLocalEvidenceSelection, inspectLocalEvidenceSelection, validatePrivacyCandidates } from './core'
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
 import { analyzeWithLocalModel, analyzeWithCloudModel } from './ai'
 import { buildInvestigationSummary } from './summary'
+import { evaluateEvidenceQuality } from './quality'
+import { recordReview, currentReviews, explainDecision } from './reconciliation'
+import type { ReviewDecision, ReviewEvent } from './reconciliation'
+import { inspectPrivacy, cloudPrivacyGate } from './privacy'
+import { filteredEvidenceGraph } from './graph-review'
+import type { GraphScope } from './graph-review'
+import { buildCaseExport, makeRedactedCaseJson } from './reports'
 import './workspace.css'
 
 type Busy = 'extract' | 'local' | 'cloud' | null
@@ -48,12 +55,26 @@ export default function InvestigationWorkspace() {
   const [cloudAttempted, setCloudAttempted] = useState(false)
   const [localAttempted, setLocalAttempted] = useState(false)
   const [localSensitive, setLocalSensitive] = useState<string[]>([])
+  const [reviewHistory, setReviewHistory] = useState<ReviewEvent[]>([])
+  const [reviewDecision, setReviewDecision] = useState<ReviewDecision>('unresolved')
+  const [reviewReason, setReviewReason] = useState('')
+  const [reviewError, setReviewError] = useState('')
+  const [privacyReviewed, setPrivacyReviewed] = useState(false)
+  const [graphScope, setGraphScope] = useState<GraphScope>('all')
+  const [graphQuery, setGraphQuery] = useState('')
+  const [graphSource, setGraphSource] = useState('')
+  const [printPreview, setPrintPreview] = useState('')
 
   const graph = useMemo(() => investigation ? buildGraph(investigation) : null, [investigation])
+  const graphView = useMemo(() => investigation ? filteredEvidenceGraph(investigation, graphScope, graphQuery, graphSource) : null, [investigation, graphScope, graphQuery, graphSource])
+  const quality = useMemo(() => investigation ? evaluateEvidenceQuality(investigation) : null, [investigation])
+  const privacy = useMemo(() => documents.length ? inspectPrivacy(documents) : null, [documents])
+  const reviews = useMemo(() => investigation ? currentReviews(investigation, reviewHistory) : [], [investigation, reviewHistory])
+  const exportData = useMemo(() => investigation ? buildCaseExport(investigation, reviewHistory, localSensitive) : null, [investigation, reviewHistory, localSensitive])
   const summary = useMemo(() => investigation ? buildInvestigationSummary(investigation) : null, [investigation])
   const detail = investigation?.findings.find(finding => finding.id === selectedFinding)
   const excerpt = findSource(documents, selectedRef)
-  const cloudValidationError = cloudPayload ? validateApprovedCloudPayload(cloudPayload, documents) : null
+  const cloudValidationError = cloudPayload ? cloudPrivacyGate(cloudPayload, documents, privacyReviewed) : null
 
   function chooseFiles(next: File[]) {
     if (busy) return
@@ -62,6 +83,11 @@ export default function InvestigationWorkspace() {
       setFiles(next)
       setDocuments([])
       setInvestigation(null)
+      setReviewHistory([])
+      setReviewReason('')
+      setReviewError('')
+      setPrintPreview('')
+      setPrivacyReviewed(false)
       setSelectedRef('')
       setSelectedFinding('')
       setEditingRef('')
@@ -102,6 +128,8 @@ export default function InvestigationWorkspace() {
       setDocuments(extracted)
       setFiles([])
       setInvestigation(null)
+      setReviewHistory([])
+      setPrintPreview('')
       setSelectedRef(extracted[0].id + ':' + extracted[0].segments[0].id)
       setStatus('Local extraction complete. ' + extracted.length + ' file(s), ' +
         extracted.reduce((sum, document) => sum + document.segments.length, 0) + ' anchored excerpts.')
@@ -123,6 +151,10 @@ export default function InvestigationWorkspace() {
     setDocuments(previous => previous.map(doc => ({ ...doc, segments: doc.segments.map(segment =>
       doc.id + ':' + segment.id === editingRef ? { ...segment, text: editedText.trim() } : segment) })))
     setInvestigation(null)
+    setReviewHistory([])
+    setReviewReason('')
+    setPrintPreview('')
+    setPrivacyReviewed(false)
     setSelectedFinding('')
     setEditingRef('')
     setEditedText('')
@@ -141,6 +173,10 @@ export default function InvestigationWorkspace() {
     if (busy || !documents.length) return
     const result = analyzeEvidence(documents)
     setInvestigation(result)
+    setReviewHistory([])
+    setReviewReason('')
+    setReviewError('')
+    setPrintPreview('')
     setSelectedFinding(result.findings[0]?.id || '')
     setLocalStatus('')
     setLocalRaw('')
@@ -174,6 +210,8 @@ export default function InvestigationWorkspace() {
       // Any earlier cloud preview was built without these newly approved local
       // privacy suggestions. Invalidate its contents and prior consent.
       setCloudPayload('')
+      setPrintPreview('')
+      setPrivacyReviewed(false)
       setPayloadApproved(false)
       setSparkConfirmed(false)
       setCloudStatus('Local review finished. Prepare a new redacted cloud preview if you want an optional cloud analysis.')
@@ -197,6 +235,7 @@ export default function InvestigationWorkspace() {
       return
     }
     setCloudPayload(prepared.payload)
+    setPrivacyReviewed(false)
     setRedactions(prepared.redactions)
     setRedactionTypes(prepared.categories)
     setIncluded(prepared.included)
@@ -240,6 +279,14 @@ export default function InvestigationWorkspace() {
     setLocalRaw('')
     setCloudStatus('')
     setCloudPayload('')
+    setPrivacyReviewed(false)
+    setReviewHistory([])
+    setReviewReason('')
+    setReviewError('')
+    setGraphScope('all')
+    setGraphQuery('')
+    setGraphSource('')
+    setPrintPreview('')
     setSparkConfirmed(false)
     setPayloadApproved(false)
     setCloudAttempted(false)
@@ -250,6 +297,16 @@ export default function InvestigationWorkspace() {
     setIncluded(0)
     setError('')
     setStatus('Case cleared from page memory. The browser has not saved your documents.')
+  }
+
+  function submitReview() {
+    if (!investigation || busy) return
+    try {
+      setReviewHistory(previous => recordReview(investigation, previous, selectedFinding, reviewDecision, reviewReason))
+      setReviewReason('')
+      setReviewError('')
+      setPrintPreview('')
+    } catch (reason) { setReviewError(describeError(reason)) }
   }
 
   function selectFinding(finding: CaseFinding) {

@@ -468,7 +468,7 @@ export default function InvestigationWorkspace() {
             </button>)}
           </div>}
           <p><strong>Verification step:</strong> {item.nextStep}</p>
-          <div className="case-citations">{item.citations.map(citation =>
+          <div className="case-summary-citations">{item.citations.map(citation =>
             <button key={citation.ref} className="inline-link" type="button" onClick={() => setSelectedRef(citation.ref)}>
               {citation.documentId} · {citation.anchor}
             </button>)}</div>

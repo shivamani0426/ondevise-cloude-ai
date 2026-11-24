@@ -144,6 +144,10 @@ function linkedGroups(records: RecordData[]): LinkedGroup[] {
   for (const refs of byValue.values()) {
     const ids = unique(refs.map(item => item.docId))
     if (ids.length < 2) continue
+    // An untyped "reference" is not evidence that invoice and shipment
+    // identifiers with the same literal token describe one shared record.
+    const typedFamilies = unique(refs.map(item => item.family).filter(family => !genericFamilies.has(family)))
+    if (typedFamilies.length > 1) continue
     // Do not connect a contract ID to a shipment ID just because their
     // strings happen to match. Generic "reference" can link a typed label.
     const compatible = refs.filter(item => refs.some(other =>
@@ -173,6 +177,15 @@ function linkedGroups(records: RecordData[]): LinkedGroup[] {
   return groups.slice(0, 8)
 }
 
+/** Real graph nodes reuse verified, source-anchored textual reference links. */
+export function linkedReferenceEntities(documents: EvidenceDocument[]): Array<{ value: string; refs: string[] }> {
+  if (documents.length < 2) return []
+  return linkedGroups(documents.slice(0, 8).map(readRecord)).map(group => ({
+    value: group.identifiers[0].value,
+    refs: unique(group.identifiers.map(item => item.ref)),
+  }))
+}
+
 // Construct claims only for fields securely scoped to a matched reference.
 // The parsing and source-linking logic remains in this module: no second parser.
 function claimFor(group: LinkedGroup, field: Field): StructuredClaim | null {
@@ -196,6 +209,23 @@ function claimFor(group: LinkedGroup, field: Field): StructuredClaim | null {
     family: owner.family, reference: owner.value,
     property: field.key, literal: field.value, context,
   })
+}
+
+function nextCheckForClaim(claim: StructuredClaim): string {
+  switch (claim.value.kind) {
+    case 'date':
+      return 'Confirm the applicable date from the original documents, any superseding amendment, signatures and issuer.'
+    case 'amount':
+      return 'Confirm the same charge or amount, currency, period and authorized adjustments using original records.'
+    case 'number':
+      return 'Confirm the unit, event stage, counting method and any corrections with the record issuer.'
+    case 'status':
+      return 'Check the recorded sequence and timestamps of each status; distinguish a transition from conflicting records.'
+    case 'version':
+      return 'Compare original revisions, approvals and effective periods to determine the governing version.'
+    default:
+      return 'Verify the field meaning, conditions, applicable scope and corrections in the original records.'
+  }
 }
 
 type Compared = { a: StructuredClaim; b: StructuredClaim; evaluation: Compatibility }
@@ -250,9 +280,7 @@ export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
           matchingSources.length + ' documents. ' + evaluation.basis + ' ' +
           (changed ? 'The change may reflect a normal progression or revision.' :
             'The discrepancy needs reconciliation, not a fraud determination.'),
-        nextStep: changed
-          ? 'Confirm the chronology, approvals and applicable version using the original records.'
-          : 'Check the original field values, currency or units, revisions and approvals with the issuer.',
+        nextStep: nextCheckForClaim(a),
         refs, origin: 'rules',
         explanation: {
           basis: evaluation.basis,

@@ -1,5 +1,5 @@
 import { compareDocumentClaims } from './compare.ts'
-import { relateEvidence } from './relationships.ts'
+import { relateEvidence, linkedReferenceEntities } from './relationships.ts'
 export type SourceSegment = { id: string; anchor: string; text: string }
 export type EvidenceDocument = {
   id: string
@@ -69,6 +69,16 @@ const patterns: { kind: EntityKind; re: RegExp }[] = [
 
 function extractEntities(documents: EvidenceDocument[]): CaseEntity[] {
   const found = new Map<string, CaseEntity>()
+  // Reference nodes must come from the SAME parsed, source-linked ID evidence
+  // used by relationship findings. Avoid a second regex inventing IDs.
+  const linked = linkedReferenceEntities(documents)
+  for (const item of linked) {
+    if (found.size >= MAX_ENTITIES) break
+    found.set('reference:' + normalize(item.value), {
+      id: 'entity-' + found.size, kind: 'reference',
+      label: limit(item.value, 60), refs: item.refs,
+    })
+  }
   for (const document of documents) {
     for (const segment of document.segments) {
       const ref = sourceRef(document, segment)
@@ -77,6 +87,9 @@ function extractEntities(documents: EvidenceDocument[]): CaseEntity[] {
         for (const match of matches.slice(0, 24)) {
           const value = match.replace(/[),.;]+$/, '')
           if (pattern.kind === 'domain' && value.includes('@')) continue
+          // Suppress legacy regex reference duplicates for the parsed ID nodes.
+          if (pattern.kind === 'reference' && linked.some(item =>
+            value.toUpperCase().includes(item.value))) continue
           const key = pattern.kind + ':' + normalize(value)
           const existing = found.get(key)
           if (existing) existing.refs = unique([...existing.refs, ref])
@@ -107,6 +120,50 @@ function addFinding(
   const evidence = unique(refs).slice(0, 12)
   if (!evidence.length || findings.length >= MAX_FINDINGS) return
   findings.push({ id: 'finding-' + findings.length, title, status, detail, nextStep, refs: evidence, origin: 'rules' })
+}
+
+// Pipeline 8B: only merge two rule findings when the source anchors AND
+// explicitly typed calendar-date claims identify the exact same discrepancy.
+// Equal document names, overlapping paragraphs, or same-case IDs alone are
+// insufficient: those would hide separate issues and their citations.
+function consolidateDateChecks(
+  documents: EvidenceDocument[], reconciled: CaseFinding[], related: CaseFinding[],
+): CaseFinding[] {
+  const remaining: CaseFinding[] = []
+  for (const legacy of reconciled) {
+    if (legacy.title !== 'Different activation or effective dates across sources' ||
+        new Set(legacy.refs).size !== 2) {
+      remaining.push(legacy)
+      continue
+    }
+    const match = related.find(candidate => {
+      const pair = candidate.explanation?.compared
+      if (!pair || pair.length !== 2 ||
+          !pair.every(item => /^(?:activation|effective|commencement) date$/i.test(item.field) &&
+            /^20\d{2}-\d{2}-\d{2}$/.test(item.value))) return false
+      const legacyRefs = new Set(legacy.refs)
+      if (!pair.every(item => legacyRefs.has(item.ref))) return false
+      // A page containing several dates may carry multiple distinct claims.
+      // Do not discard the broader rule in that ambiguous situation.
+      return pair.every(item => {
+        const source = findSource(documents, item.ref)
+        if (!source) return false
+        const dates = unique(source.segment.text.match(/\b20\d{2}-\d{2}-\d{2}\b/g) || [])
+        return dates.length === 1 && dates[0] === item.value
+      })
+    })
+    if (!match) {
+      remaining.push(legacy)
+      continue
+    }
+    match.refs = unique([...match.refs, ...legacy.refs]).slice(0, 12)
+    // Both independently authored verification instructions remain available
+    // in the single source-backed finding.
+    if (!match.nextStep.includes(legacy.nextStep)) {
+      match.nextStep += ' ' + legacy.nextStep
+    }
+  }
+  return remaining
 }
 
 export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
@@ -189,16 +246,11 @@ export function analyzeEvidence(documents: EvidenceDocument[]): Investigation {
     'Do not disclose OTPs, passwords or financial credentials. Verify the purpose and recipient of any identity-document request.',
     identifiers.map(hit => hit.ref))
 
-  // Review generalized cross-document claims without treating stages, revisions,
-  // unsigned amendments or inconsistent labels as proven contradictions.
-  for (const candidate of compareDocumentClaims(documents)) {
-    if (findings.length >= MAX_FINDINGS) break
-    findings.push(candidate)
-  }
-  // Domain-neutral record links are grounded in explicit references, never
-  // filenames or a model's assertions. They complement the existing cautious
-  // rule comparisons and do not claim verified fraud or shared ownership.
-  for (const candidate of relateEvidence(documents)) {
+  // Build both independent conservative rule passes first, then merge ONLY
+  // exact duplicate date claims. Preserve unrelated cues and source anchors.
+  const related = relateEvidence(documents)
+  const reconciled = consolidateDateChecks(documents, compareDocumentClaims(documents), related)
+  for (const candidate of [...reconciled, ...related]) {
     if (findings.length >= MAX_FINDINGS) break
     findings.push(candidate)
   }

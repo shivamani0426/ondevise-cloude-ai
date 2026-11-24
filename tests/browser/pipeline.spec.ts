@@ -264,6 +264,10 @@ test('generic invoice matching is visible in the real local evidence graph and n
   await expect(page.getByText('Local extraction complete.',{exact:false})).toBeVisible()
   await page.getByRole('button', {name:'Build evidence graph and findings'}).click()
   await expect(page.getByRole('heading',{name:'Evidence graph and findings'})).toBeVisible()
+  await expect(page.getByText('1 entity · 1 finding')).toBeVisible()
+  await expect(page.locator('.case-graph-node.entity')).toHaveCount(1)
+  await expect(page.locator('.case-graph-node.finding')).toHaveCount(1)
+  await expect(page.locator('.case-edges line')).toHaveCount(3)
   await page.locator('.case-findings .case-finding').filter({
     hasText:'Same reference, different recorded field values',
   }).click()
@@ -305,4 +309,36 @@ test('Pipeline 7: unrelated status updates are explained without a false fraud v
   await expect(detail.locator('.case-explanation')).toContainText('status that may change over time')
   await expect(detail.locator('.case-citations .inline-link')).toHaveCount(4)
   expect(sent).toEqual([])
+})
+
+
+test('Pipeline 8: contract dates merge into one explained finding and preserve all cited steps', async ({ page }) => {
+  const outgoing: string[] = []
+  page.on('request', request => {
+    if (/firebasevertexai|generativelanguage|attacker\.example/i.test(request.url())) {
+      outgoing.push(request.url())
+    }
+  })
+  await openWorkspace(page)
+  await page.locator('#evidence-upload').setInputFiles([
+    txt('B1_contract_original.txt', 'Contract No: CNTR-2027-0099\neffective_date: 2027-03-10\nstatus: active'),
+    txt('B2_contract_change.txt', 'contract_number: CNTR-2027-0099\neffective_date: 2027-04-01\nstatus: pending'),
+  ])
+  await page.getByRole('button', { name: 'Extract selected files locally' }).click()
+  await expect(page.getByText('Local extraction complete.', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: 'Build evidence graph and findings' }).click()
+  await expect(page.locator('.case-findings .case-finding')).toHaveCount(1)
+  await expect(page.locator('.case-graph-node.entity')).toHaveCount(3)
+  await page.locator('.case-findings .case-finding').click()
+  const detail = page.locator('.case-detail')
+  await expect(detail.getByRole('heading', { name: 'Same reference, different recorded field values' })).toBeVisible()
+  await detail.locator('.case-explanation summary').click()
+  await expect(detail.locator('.case-explanation')).toContainText('calendar dates')
+  await expect(detail.locator('.case-explanation')).toContainText('2027-03-10')
+  await expect(detail.locator('.case-explanation')).toContainText('2027-04-01')
+  await expect(detail.locator('.case-explanation')).not.toContainText('currency')
+  await expect(detail).toContainText('Check which document is signed and effective')
+  await expect(detail.locator('.case-citations .inline-link')).toHaveCount(4)
+  await expect(detail).not.toContainText('proven fraud')
+  expect(outgoing).toEqual([])
 })

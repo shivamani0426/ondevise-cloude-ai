@@ -126,6 +126,24 @@ export function compareClaimContext(a: StructuredClaim, b: StructuredClaim): Com
   const conditionChanged = a.context.condition && b.context.condition &&
     normalized(a.context.condition) !== normalized(b.context.condition)
 
+  const typeContext = (): string => {
+    switch (a.value.kind) {
+      case 'date':
+        return 'Both values are valid calendar dates for the same explicitly named milestone. Confirm which date applies, including any later amendment, signature or effective period.'
+      case 'amount':
+        return a.value.currency
+          ? 'Both amounts use ' + a.value.currency + '. Check the applicable charge, rate, period and amendments before treating the difference as an unresolved amount.'
+          : 'Both amounts have no stated currency in these fields. Confirm currency, unit, charge basis and period independently.'
+      case 'number':
+        return 'Both fields contain numeric values. Confirm units, counting method, event stage and any revisions.'
+      case 'status':
+        return 'The value is a status that may change over time. Check when each status was recorded and whether it is final.'
+      case 'version':
+        return 'The values describe different record versions. Verify whether an amendment superseded another and which record controls.'
+      default:
+        return 'The same labelled field contains different text. Check its definition, conditions, scope and applicable revision.'
+    }
+  }
   if (same) return {
     outcome: 'agree', basis: base,
     context: 'The extracted field values agree. That does not independently confirm their accuracy.',
@@ -134,8 +152,8 @@ export function compareClaimContext(a: StructuredClaim, b: StructuredClaim): Com
   if (a.value.kind === 'status' || a.value.kind === 'version' ||
       versionChanged || approvalUnknown || conditionChanged) {
     const reasons = [
-      a.value.kind === 'status' ? 'The value is a status that may change over time.' : '',
-      a.value.kind === 'version' || versionChanged ? 'Different record versions may supersede earlier values.' : '',
+      typeContext(),
+      versionChanged ? 'Different record versions may supersede earlier values.' : '',
       approvalUnknown ? 'Approval or signature context is incomplete or pending.' : '',
       conditionChanged ? 'The stated conditions differ.' : '',
     ].filter(Boolean)
@@ -149,7 +167,7 @@ export function compareClaimContext(a: StructuredClaim, b: StructuredClaim): Com
   return {
     outcome: 'different-values',
     basis: base + ' Its extracted values differ.',
-    context: 'The values are comparable in field type and, where available, currency. Verify any scope, conditions, corrections and effective dates before treating this as a contradiction.',
+    context: typeContext() + ' Extracted differences remain review cues, not verified contradictions.',
     limitation: caution,
   }
 }

@@ -320,7 +320,7 @@ export default function InvestigationWorkspace() {
       </section>}
 
       {investigation && <section className="case-panel" aria-labelledby="findings-title">
-        <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} entities · {investigation.findings.length} findings</span></div>
+        <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} {investigation.entities.length === 1 ? 'entity' : 'entities'} · {investigation.findings.length} {investigation.findings.length === 1 ? 'finding' : 'findings'}</span></div>
         <p>Rule-based findings compare evidence across document categories, including explicit shared record references and differences in the same labelled field. Matching reference strings do NOT establish the same real-world event, authenticity or fraud. Different process stages or unsigned revisions require manual review. AI can only select literal quotations from extracted sources.</p>
 
         {graph && <div className="case-graph-map" aria-label="Interactive evidence graph">

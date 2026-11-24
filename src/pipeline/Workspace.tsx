@@ -382,15 +382,33 @@ export default function InvestigationWorkspace() {
         <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} {investigation.entities.length === 1 ? 'entity' : 'entities'} · {investigation.findings.length} {investigation.findings.length === 1 ? 'finding' : 'findings'}</span></div>
         <p>Rule-based findings compare evidence across document categories, including explicit shared record references and differences in the same labelled field. Matching reference strings do NOT establish the same real-world event, authenticity or fraud. Different process stages or unsigned revisions require manual review. AI can only select literal quotations from extracted sources.</p>
 
-        {graph && <div className="case-graph-map" aria-label="Interactive evidence graph">
+        <div className="case-graph-tools" aria-label="Graph filters">
+          <label htmlFor="graph-view-scope">Link type
+            <select id="graph-view-scope" value={graphScope} onChange={event => setGraphScope(event.target.value as GraphScope)}>
+              <option value="all">All traced links</option><option value="rules">Rule findings</option>
+              <option value="ai">AI evidence selections</option>
+            </select>
+          </label>
+          <label htmlFor="graph-source-filter">Trace one source
+            <select id="graph-source-filter" value={graphSource} onChange={event => setGraphSource(event.target.value)}>
+              <option value="">All sources</option>
+              {documents.map(doc => <option key={doc.id} value={doc.id}>{doc.id}</option>)}
+            </select>
+          </label>
+          <label htmlFor="graph-search">Search visible labels
+            <input id="graph-search" value={graphQuery} maxLength={80} placeholder="Reference or finding" onChange={event => setGraphQuery(event.target.value)}/>
+          </label>
+        </div>
+        <p className="case-caution">Graph edges mean extracted source references, rule associations or AI-selected review cues—not authenticated real-world relationships.</p>
+        {graphView && <div className="case-graph-map" aria-label="Interactive evidence graph">
           <svg className="case-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {graph.edges.map((edge, i) => {
+            {graphView.edges.map((edge, i) => {
               const from = graph.nodes.find(node => node.id === edge.from)
               const to = graph.nodes.find(node => node.id === edge.to)
               return from && to ? <line key={i} x1={from.x} y1={from.y} x2={to.x} y2={to.y}/> : null
             })}
           </svg>
-          {graph.nodes.map(node => <button key={node.id} type="button" className={'case-graph-node ' + node.kind}
+          {graphView.nodes.map(node => <button key={node.id} type="button" className={'case-graph-node ' + node.kind}
             style={{ left: node.x + '%', top: node.y + '%' }}
             title={node.label}
             onClick={() => {
@@ -408,6 +426,14 @@ export default function InvestigationWorkspace() {
           <div className="case-graph-caption">Sources → Entities → Findings</div>
         </div>}
         <p className="case-caution">Accessible alternative: all graph relationships can be followed in the findings and cited excerpts below.</p>
+        {graphView && <details className="case-explanation">
+          <summary>Trace {graphView.edges.length} grounded graph links</summary>
+          <ul className="case-trace-list">{graphView.edges.map((edge, index) => {
+            const from = graphView.nodes.find(node => node.id === edge.from)
+            const to = graphView.nodes.find(node => node.id === edge.to)
+            return <li key={edge.from + ':' + edge.to + ':' + index}>{from?.label} → {to?.label} · {edge.basis}</li>
+          })}</ul>
+        </details>}
         <div className="case-findings">
           {investigation.findings.map(finding => <button key={finding.id} type="button"
             className={'case-finding ' + (selectedFinding === finding.id ? 'chosen' : '')}

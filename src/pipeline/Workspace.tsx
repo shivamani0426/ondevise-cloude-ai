@@ -407,7 +407,74 @@ export default function InvestigationWorkspace() {
         {error && <p className="case-error" role="alert">{error}</p>}
       </section>
 
-      {documents.length > 0 && <section className="case-panel" aria-labelledby="documents-title">
+      {viewMode === 'simple' && investigation && summary && <section className="case-panel case-quick-results" aria-labelledby="quick-results-title">
+        <div className="case-panel-top">
+          <div>
+            <p className="case-quick-kicker">YOUR REVIEW</p>
+            <h2 id="quick-results-title">2. Here's what we found</h2>
+          </div>
+          <span className="case-tag">{summary.ruleFindingCount ? 'Needs your review' : 'No rule-matched concerns'}</span>
+        </div>
+        <div className="case-quick-stats">
+          <span><strong>{summary.sourceCount}</strong> documents checked</span>
+          <span><strong>{summary.ruleFindingCount}</strong> item{summary.ruleFindingCount === 1 ? '' : 's'} to review</span>
+        </div>
+        <p className="case-quick-lead">{summary.ruleFindingCount
+          ? 'We found differences worth checking against the original records. This does not mean anything fraudulent happened.'
+          : 'No discrepancy matched the available checks. This does not prove your documents are complete or accurate.'}</p>
+        {summary.findings.map(item => <article className="case-quick-finding" key={item.id}>
+          <h3>{item.title}</h3>
+          <p>{item.explanation}</p>
+          {item.compared.length > 0 && <div className="case-quick-values">
+            {item.compared.map((value, i) => <button key={value.ref + ':' + i} type="button"
+              onClick={() => setSelectedRef(value.ref)} className="case-quick-value">
+              <span>{value.field}</span><strong>{value.value}</strong>
+            </button>)}
+          </div>}
+          <p><strong>What to check next:</strong> {item.nextStep}</p>
+          <details className="case-quick-citations">
+            <summary>See the source lines ({item.citations.length})</summary>
+            <div className="case-quick-links">
+              {item.citations.map(citation => <button key={citation.ref} type="button" className="inline-link"
+                onClick={() => setSelectedRef(citation.ref)}>{citation.documentId} · {citation.anchor}</button>)}
+            </div>
+          </details>
+        </article>)}
+        <details className="case-quick-source">
+          <summary>View original extracted text{excerpt ? ' · ' + excerpt.document.name : ''}</summary>
+          {excerpt ? <>
+            <p><strong>{excerpt.document.name}</strong> · {excerpt.segment.anchor}</p>
+            <blockquote>{excerpt.segment.text}</blockquote>
+          </> : <p>Choose a source citation above to inspect its extracted text.</p>}
+        </details>
+        {quality && <p className="case-quick-quality">Evidence coverage: {quality.coveredSourceCount} of {quality.totalSourceCount} source(s) cited by findings. Extraction can miss context, formatting and signatures.</p>}
+        <details className="case-quick-source">
+          <summary>Important limitations</summary>
+          <ul>{summary.limitations.map(limitation => <li key={limitation}>{limitation}</li>)}</ul>
+        </details>
+      </section>}
+      {viewMode === 'simple' && investigation && <section className="case-panel case-quick-export" aria-labelledby="quick-export-title">
+        <h2 id="quick-export-title">3. Save your review</h2>
+        <p>Exports are redacted locally. Read every page before sharing—automatic masking can miss private details.</p>
+        <div className="case-actions">
+          <button className="primary-action" disabled={Boolean(busy)} type="button"
+            onClick={() => setPrintPreview(exportData?.redactedReport || '')}>Review and save as PDF</button>
+          <button className="outline-action" disabled={Boolean(busy)} type="button"
+            onClick={() => saveText('phantomgraph-redacted-report.txt', reportInvestigation(investigation, localSensitive))}>Download text report</button>
+        </div>
+        {printPreview && <div className="case-report-preview">
+          <h3>Review before printing</h3>
+          <p className="case-caution">Inspect the redacted preview below, then choose Print / Save as PDF. No server upload occurs.</p>
+          <pre className="case-report-text">{printPreview}</pre>
+          <div className="case-actions">
+            <button type="button" className="primary-action" onClick={() => window.print()}>Print / Save as PDF</button>
+            <button type="button" className="outline-action" onClick={() => setPrintPreview('')}>Close preview</button>
+          </div>
+        </div>}
+        <p className="case-quick-help">Need to correct extracted text, trace a graph link or record an investigator decision? Choose <strong>Show advanced tools</strong> above.</p>
+      </section>}
+
+      {viewMode === 'advanced' && documents.length > 0 && <section className="case-panel" aria-labelledby="documents-title">
         <div className="case-panel-top"><h2 id="documents-title">2. Inspect extracted evidence</h2><span className="case-tag">{documents.length} sources</span></div>
         <p className="case-caution">Extraction can lose layout, tables, handwriting and context. Verify quotations against the original documents. Your originals were never sent to Firebase.</p>
         <div className="source-list">
@@ -439,7 +506,7 @@ export default function InvestigationWorkspace() {
         <button className="primary-action" type="button" disabled={Boolean(busy)} onClick={analyze}>Build evidence graph and findings</button>
       </section>}
 
-      {investigation && <section className="case-panel" aria-labelledby="findings-title">
+      {viewMode === 'advanced' && investigation && <section className="case-panel" aria-labelledby="findings-title">
         <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} {investigation.entities.length === 1 ? 'entity' : 'entities'} · {investigation.findings.length} {investigation.findings.length === 1 ? 'finding' : 'findings'}</span></div>
         <p>Rule-based findings compare evidence across document categories, including explicit shared record references and differences in the same labelled field. Matching reference strings do NOT establish the same real-world event, authenticity or fraud. Different process stages or unsigned revisions require manual review. AI can only select literal quotations from extracted sources.</p>
 
@@ -545,7 +612,7 @@ export default function InvestigationWorkspace() {
 
       </section>}
 
-      {investigation && <section className="case-panel" aria-labelledby="ai-review-title">
+      {viewMode === 'advanced' && investigation && <section className="case-panel" aria-labelledby="ai-review-title">
         <div className="case-panel-top"><h2 id="ai-review-title">4. Optional hybrid AI review</h2><span className="case-tag">Explicit actions only</span></div>
         <p>On-device evidence selection remains local and source-verifiable. Gemini cloud access is currently restricted for this project; do not assume the optional cloud route works. Source authenticity and interpretation still require human review.</p>
 
@@ -597,7 +664,7 @@ export default function InvestigationWorkspace() {
         </div>
       </section>}
 
-      {summary && <section className="case-panel case-summary" aria-labelledby="summary-title">
+      {viewMode === 'advanced' && summary && <section className="case-panel case-summary" aria-labelledby="summary-title">
         <div className="case-panel-top">
           <h2 id="summary-title">Investigation summary</h2>
           <span className="case-tag">{summary.status}</span>
@@ -630,7 +697,7 @@ export default function InvestigationWorkspace() {
         </details>
       </section>}
 
-      {quality && <section className="case-panel" aria-labelledby="quality-title">
+      {viewMode === 'advanced' && quality && <section className="case-panel" aria-labelledby="quality-title">
         <div className="case-panel-top"><h2 id="quality-title">Pipeline 10 · Evidence quality and confidence</h2><span className="case-tag">No fraud score</span></div>
         <p className="case-caution">Quality labels describe extracted evidence completeness and citation coverage, not the probability of fraud or correctness.</p>
         <p>{quality.coveredSourceCount} of {quality.totalSourceCount} sources have an excerpt cited by a current finding.</p>
@@ -648,7 +715,7 @@ export default function InvestigationWorkspace() {
         </details>)}
       </section>}
 
-      {investigation && <section className="case-panel" aria-labelledby="reconcile-title">
+      {viewMode === 'advanced' && investigation && <section className="case-panel" aria-labelledby="reconcile-title">
         <div className="case-panel-top"><h2 id="reconcile-title">Pipeline 11 · Reconciliation workspace</h2><span className="case-tag">{reviews.length} reviewed finding(s)</span></div>
         <p className="case-caution">Decisions are user-reported and retained only in page memory. “Verified” means an investigator claims external verification; PhantomGraph does not authenticate records.</p>
         <label className="case-editor-label" htmlFor="review-finding">Rule-based finding to review</label>
@@ -677,7 +744,7 @@ export default function InvestigationWorkspace() {
         </div>
       </section>}
 
-      {investigation && <section className="case-panel" aria-labelledby="report-title">
+      {viewMode === 'advanced' && investigation && <section className="case-panel" aria-labelledby="report-title">
         <div className="case-panel-top"><h2 id="report-title">5. Export or delete case</h2><span className="case-tag">No server storage</span></div>
         <p>Download a redacted local text report with document IDs, findings and source anchors. Original filenames are omitted. Automatic masking is incomplete, so read the report before sharing.</p>
         <div className="case-actions">

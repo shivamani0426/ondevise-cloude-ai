@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { evidence, findings, nodes, edges, reportText, type Finding } from './demo'
-import { firebaseConfigured, verifyAppCheck, runDeviceProbe, runCloudProbe, supportsChromeOnDevice } from './firebase'
+import { localPhaseMessage } from './pipeline/local-runtime'
+import { CLOUD_ENABLED, firebaseConfigured, verifyAppCheck, runDeviceProbe, runCloudProbe, supportsChromeOnDevice } from './firebase'
 import InvestigationWorkspace from './pipeline/Workspace'
 
 type Section = 'overview' | 'workspace' | 'evidence' | 'findings' | 'investigation' | 'report'
@@ -101,7 +102,7 @@ export default function App() {
     setDeviceResult('Preparing the on-device model. No cloud fallback is allowed.')
     try {
       // runDeviceProbe initializes the local model from this direct button activation.
-      const result = await runDeviceProbe(setDeviceDownloadProgress)
+      const result = await runDeviceProbe(setDeviceDownloadProgress, phase => setDeviceResult(localPhaseMessage(phase)))
       setDeviceResult('Verified ' + result.source + ' inference. Model replied: ' + result.text)
     } catch (error) {
       setDeviceResult('On-device inference not verified: ' + (error instanceof Error ? error.message : 'Unknown error') + '. No cloud fallback was attempted.')
@@ -111,7 +112,7 @@ export default function App() {
   }
 
   async function testCloudInference() {
-    if (!sparkConfirmed || cloudProbeAttempted) return
+    if (!CLOUD_ENABLED || !sparkConfirmed || cloudProbeAttempted) return
     setCloudProbeAttempted(true)
     setProbeRunning('cloud')
     setCloudResult('Sending one fixed fictional test prompt, not case evidence.')
@@ -168,10 +169,10 @@ export default function App() {
                 {deviceDownloadProgress > 0 && deviceDownloadProgress < 1 && <p className="small-muted">Local model download: {Math.round(deviceDownloadProgress * 100)}%</p>}
                 {deviceResult && <p className="status-message" role="status">{deviceResult}</p>}
                 <div className="probe-divider" />
-                <h3>2. Test Firebase cloud AI</h3>
+                <h3>2. Test Firebase cloud AI (disabled)</h3>
                 <p className="small-muted">Uses Gemini Developer API model gemini-3.5-flash-lite. One fixed fictional prompt is sent only when you click the button. No investigation data is uploaded. Free-tier quota limits apply.</p>
                 <label className="probe-consent"><input type="checkbox" checked={sparkConfirmed} onChange={(event) => setSparkConfirmed(event.target.checked)} /> I checked that this Firebase project is on the no-cost Spark plan and has no billing account linked.</label>
-                <button className="outline-action" type="button" disabled={!firebaseConfigured || !sparkConfirmed || cloudProbeAttempted || Boolean(probeRunning) || checkingAppCheck} onClick={testCloudInference}>{probeRunning === 'cloud' ? 'Testing cloud model…' : cloudProbeAttempted ? 'Cloud probe attempted (refresh to retry)' : 'Send one fictional cloud test'}</button>
+                <button className="outline-action" type="button" disabled={!CLOUD_ENABLED || !firebaseConfigured || !sparkConfirmed || cloudProbeAttempted || Boolean(probeRunning) || checkingAppCheck} onClick={testCloudInference}>{probeRunning === 'cloud' ? 'Testing cloud model…' : cloudProbeAttempted ? 'Cloud probe attempted (refresh to retry)' : 'Send one fictional cloud test'}</button>
                 {cloudResult && <p className="status-message" role="status">{cloudResult}</p>}
                 <p className="small-muted">App Check token retrieval and AI inference are separate checks. A passed App Check test alone is not proof that cloud or local AI works.</p>
               </article>

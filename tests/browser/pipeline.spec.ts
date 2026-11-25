@@ -74,6 +74,7 @@ test('cloud payload starts redacted, must be reviewed and never sends silently',
   await expect(page.getByRole('button', { name: 'Send this exact approved payload once' })).toBeDisabled()
   await page.getByRole('checkbox', { name: /I verified Firebase Spark/ }).check()
   await page.getByRole('checkbox', { name: /I reviewed every character/ }).check()
+  await expect(page.getByRole('button', { name: 'Send this exact approved payload once' })).toBeDisabled()
   await payload.fill((await payload.inputValue()) + '\nMANUAL_EDIT')
   await expect(page.getByRole('checkbox', { name: /I reviewed every character/ })).not.toBeChecked()
   await expect(page.getByRole('button', { name: 'Send this exact approved payload once' })).toBeDisabled()

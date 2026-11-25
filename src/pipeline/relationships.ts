@@ -23,6 +23,18 @@ const badField = /(^|_)(?:id|no|number|reference|ref|code|secret|password|token|
 const trimValue = (s: string) => s.trim().replace(/^["'[{(]+|["'\s,;.)}\]]+$/g, '')
 const fieldKey = (raw: string) => raw.trim().replace(/([a-z])([A-Z])/g, '$1_$2')
   .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+// Explicit synonyms only; preserve currency, period, stage and charge scope.
+const canonicalField = (raw: string): string => {
+  const key = fieldKey(raw)
+  const aliases: Record<string, string> = {
+    date_of_issue: 'issue_date', date_of_expiry: 'expiry_date',
+    date_of_activation: 'activation_date', date_of_birth: 'birth_date',
+    claim_amount: 'claimed_amount', invoice_total: 'total_invoice_amount',
+  }
+  const match = key.match(/^(.*?)(_usd|_inr|_eur|_gbp)$/)
+  const root = match ? match[1] : key
+  return (aliases[root] || root) + (match?.[2] || '')
+}
 const familyOf = (label: string): string | null => {
   const words = fieldKey(label).split('_').filter(Boolean)
   const family = words.find(word => identityFamilies.includes(word))
@@ -35,6 +47,8 @@ function idValue(raw: string): string | null {
   const value = trimValue(raw).toUpperCase().replace(/_/g, '-')
   if (value.length < 6 || value.length > 48 || !/^[A-Z0-9-]+$/.test(value) ||
       !/[A-Z]/.test(value) || !/\d/.test(value) || ignoredValues.test(value)) return null
+  // Explicit masking must never be treated as a complete identifier.
+  if (/^X{3,}[A-Z0-9-]{4,16}$/.test(value)) return null
   // Don't treat long free text, dates, or raw card/account numbers as IDs.
   if (/^20\d{2}-\d{2}-\d{2}$/.test(value)) return null
   return value
@@ -47,7 +61,7 @@ function addIdentifier(items: Identifier[], docId: string, ref: string, family: 
   }
 }
 function addField(fields: Field[], docId: string, ref: string, label: string, raw: string) {
-  const key = fieldKey(label)
+  const key = canonicalField(label)
   const value = trimValue(raw)
   if (!key || key.length > 42 || badField.test(key) || key === 'source' ||
       !value || value.length > 60 || /\n/.test(value) || /^(?:null|none|unknown|n\/a|unspecified)$/i.test(value)) return
@@ -107,6 +121,14 @@ function readRecord(document: EvidenceDocument): RecordData {
     // Handle JSON object properties (including pretty-printed JSON lines),
     // colon-separated TXT/MD and "key=value" fields. Do not infer values
     // from unlabelled prose.
+    // Recognize narrowly scoped affirmative narrative facts, not arbitrary prose.
+    // A full labelled record ID on the same line is required. Negation, conditions,
+    // revisions, and competing references are left for manual review.
+    const sentence = segment.text.trim().match(/^(invoice|claim|application|policy|contract|agreement|order|transaction|shipment|case|ticket)\s+(?:ID|number|No\.?|reference)\s*[:#]?\s*([A-Za-z][A-Za-z0-9_-]{5,47})\s+(?:has|records|states)\s+(?:an?\s+)?(issue date|expiry date|activation date|claimed amount|claim amount|invoice total|total invoice amount|amount)\s+of\s+((?:USD|INR|EUR|GBP|[$₹€£])?\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:USD|INR|EUR|GBP))?|\d{4}-\d{2}-\d{2})\.?$/i)
+    if (sentence && idValue(sentence[2])) {
+      addIdentifier(identifiers, document.id, ref, sentence[1].toLowerCase(), sentence[2])
+      addField(fields, document.id, ref, sentence[3], sentence[4])
+    }
     const parts = segment.text.split(/[,;]\s*(?=["']?[A-Za-z][\w -]{0,40}["']?\s*[:=])/)
     for (const part of parts) {
       const m = part.trim().match(/^[{(]?\s*["']?([A-Za-z][\w -]{0,42})["']?\s*[:=]\s*(.*)$/)
@@ -259,6 +281,52 @@ function compareGroup(group: LinkedGroup): Compared | null {
     options.find(item => item.evaluation.outcome === 'context-dependent') || null
 }
 
+// Explicitly labelled masked identifiers are only candidate review cues.
+// Require a unique full identifier of the same family and an exact suffix.
+// Do not attach other fields, manufacture graph identity nodes, or treat
+// ambiguous or unlabelled matches as evidence of the same record.
+function partialReferenceCues(records: RecordData[]): CaseFinding[] {
+  const full = records.flatMap(record => record.identifiers)
+  const output: CaseFinding[] = []
+  const seen = new Set<string>()
+  for (const record of records) {
+    if (record.document.format.toUpperCase() === 'CSV') continue
+    for (const segment of record.document.segments.slice(0, 240)) {
+      const match = segment.text.trim().match(/^(invoice|order|transaction|payment|receipt|contract|agreement|shipment|tracking|booking|reservation|claim|case|policy|application|ticket)\s+(?:ID|number|No\.?|reference)\s*(?:[:#]\s*)?(?:ending in\s+|\*{3,}|X{3,})([A-Z0-9-]{4,16})\.?$/i)
+      if (!match) continue
+      const family = match[1].toLowerCase()
+      const suffix = match[2].toUpperCase()
+      if (!/\d/.test(suffix)) continue
+      // A second complete reference in the partial source may refer to
+      // another record; leave it for a human instead of guessing.
+      if (record.identifiers.length) continue
+      const compatible = full.filter(id => id.docId !== record.document.id &&
+        id.family === family && id.value.endsWith(suffix) && id.value.length > suffix.length)
+      if (new Set(compatible.map(id => id.value)).size !== 1) continue
+      const target = compatible[0]
+      const ref = record.document.id + ':' + segment.id
+      const key = ref + ':' + target.value
+      if (seen.has(key)) continue
+      seen.add(key)
+      output.push({
+        id: 'partial-reference-' + output.length,
+        title: 'Incomplete reference needs verification',
+        status: 'Unverified hypothesis',
+        detail: 'A source explicitly states an incomplete record reference that matches the ending of one full reference among the supplied documents. This is a candidate only, not a confirmed record relationship.',
+        nextStep: 'Obtain the complete identifier from the issuer and verify the record independently before comparing any fields.',
+        refs: [ref, target.ref], origin: 'rules',
+        explanation: {
+          basis: 'An explicitly labelled partial identifier and a full identifier of the same record type share an exact ending.',
+          context: 'Only one matching full reference was found in the supplied sources. Other records not supplied may share the same ending. No field values were compared.',
+          limitation: 'A partial identifier cannot establish record identity, authenticity or fraud.',
+        },
+      })
+      if (output.length >= 3) return output
+    }
+  }
+  return output
+}
+
 /** A linked identity is a *matching token* with source anchors, not a real-world verification. */
 export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
   if (documents.length < 2) return []
@@ -317,5 +385,5 @@ export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
       })
     }
   }
-  return results
+  return [...results, ...partialReferenceCues(records)].slice(0, 5)
 }

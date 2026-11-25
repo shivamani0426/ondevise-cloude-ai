@@ -3,7 +3,7 @@
 This is a candidate, not a verified production release. Cloud inference is disabled at the UI and inference entry points; redacted previews remain local. No billing or dependency additions.
 
 - 15: shared local AI availability check, progress phases, bounded 180-second wait, quarantine of outstanding SDK calls, explicit retry. SDK calls cannot be forcibly aborted here; reload may be required.
-- 16: conservative affirmative narrative patterns with a full explicit identity, narrow aliases, existing context gates and anchored comparisons. Incomplete IDs are deliberately not linked automatically. Other prose, multi-event relationships and complex conditions still need manual review.
+- 16: conservative affirmative narrative patterns with a full explicit identity, narrow aliases, existing context gates and anchored comparisons. Explicitly labelled partial identifiers with a unique same-type suffix match receive a separate unverified review cue, without value comparisons or confirmed graph identity. Ambiguous and unlabelled fragments remain unlinked. Other prose, multi-event relationships and complex conditions still need manual review.
 - 17: simple-mode expandable interactive graph with source inspection; advanced controls preserved.
 - 18: new synthetic cross-domain positive and negative unit cases plus browser graph and cloud-disabled assertions. Synthetic fixtures do not measure field accuracy on real-world originals.
 - 19: existing CI runs build, lint, unit, browser and dependency audit; require successful checks before merge. Actual results must be recorded from CI, not inferred.

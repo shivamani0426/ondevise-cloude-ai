@@ -279,6 +279,52 @@ function compareGroup(group: LinkedGroup): Compared | null {
     options.find(item => item.evaluation.outcome === 'context-dependent') || null
 }
 
+// Explicitly labelled masked identifiers are only candidate review cues.
+// Require a unique full identifier of the same family and an exact suffix.
+// Do not attach other fields, manufacture graph identity nodes, or treat
+// ambiguous or unlabelled matches as evidence of the same record.
+function partialReferenceCues(records: RecordData[]): CaseFinding[] {
+  const full = records.flatMap(record => record.identifiers)
+  const output: CaseFinding[] = []
+  const seen = new Set<string>()
+  for (const record of records) {
+    if (record.document.format.toUpperCase() === 'CSV') continue
+    for (const segment of record.document.segments.slice(0, 240)) {
+      const match = segment.text.trim().match(/^(invoice|order|transaction|payment|receipt|contract|agreement|shipment|tracking|booking|reservation|claim|case|policy|application|ticket)\s+(?:ID|number|No\.?|reference)\s*(?:[:#]\s*)?(?:ending in\s+|\*{3,}|X{3,})([A-Z0-9-]{4,16})\.?$/i)
+      if (!match) continue
+      const family = match[1].toLowerCase()
+      const suffix = match[2].toUpperCase()
+      if (!/\d/.test(suffix)) continue
+      // A second complete reference in the partial source may refer to
+      // another record; leave it for a human instead of guessing.
+      if (record.identifiers.length) continue
+      const compatible = full.filter(id => id.docId !== record.document.id &&
+        id.family === family && id.value.endsWith(suffix) && id.value.length > suffix.length)
+      if (new Set(compatible.map(id => id.value)).size !== 1) continue
+      const target = compatible[0]
+      const ref = record.document.id + ':' + segment.id
+      const key = ref + ':' + target.value
+      if (seen.has(key)) continue
+      seen.add(key)
+      output.push({
+        id: 'partial-reference-' + output.length,
+        title: 'Incomplete reference needs verification',
+        status: 'Unverified hypothesis',
+        detail: 'A source explicitly states an incomplete record reference that matches the ending of one full reference among the supplied documents. This is a candidate only, not a confirmed record relationship.',
+        nextStep: 'Obtain the complete identifier from the issuer and verify the record independently before comparing any fields.',
+        refs: [ref, target.ref], origin: 'rules',
+        explanation: {
+          basis: 'An explicitly labelled partial identifier and a full identifier of the same record type share an exact ending.',
+          context: 'Only one matching full reference was found in the supplied sources. Other records not supplied may share the same ending. No field values were compared.',
+          limitation: 'A partial identifier cannot establish record identity, authenticity or fraud.',
+        },
+      })
+      if (output.length >= 3) return output
+    }
+  }
+  return output
+}
+
 /** A linked identity is a *matching token* with source anchors, not a real-world verification. */
 export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
   if (documents.length < 2) return []
@@ -337,5 +383,5 @@ export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
       })
     }
   }
-  return results
+  return [...results, ...partialReferenceCues(records)].slice(0, 5)
 }

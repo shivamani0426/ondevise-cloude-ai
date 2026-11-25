@@ -1,3 +1,5 @@
+import { checkLocalAvailability, runLocalExclusive } from './pipeline/local-runtime'
+import type { LocalProgress } from './pipeline/local-runtime'
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app'
 import { getToken, initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from 'firebase/app-check'
 import { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode, InferenceSource } from 'firebase/ai'
@@ -13,6 +15,7 @@ const config = {
 const siteKey = import.meta.env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY || ''
 const PROBE_PROMPT = 'This is a fictional connection test, not an investigation. Reply with exactly: PHANTOMGRAPH_PROBE_OK'
 export const CLOUD_MODEL = 'gemini-3.5-flash-lite'
+export const CLOUD_ENABLED = false
 
 export const firebaseConfigured = Boolean(
   config.apiKey && config.authDomain && config.projectId && config.appId && siteKey
@@ -61,7 +64,11 @@ export type InferenceProbe = { source: 'ON_DEVICE' | 'IN_CLOUD'; text: string }
 
 // Called synchronously from a user click. ONLY_ON_DEVICE guarantees that a
 // missing local model produces an error, never an unexpected cloud request.
-export async function runDeviceProbe(onProgress: (fraction: number) => void): Promise<InferenceProbe> {
+export async function runDeviceProbe(onProgress: (fraction: number) => void, onPhase: LocalProgress = () => {}): Promise<InferenceProbe> {
+  return runLocalExclusive(async active => {
+  onPhase('checking')
+  await checkLocalAvailability()
+  if (!active()) throw new Error('Local probe expired.')
   if (!supportsChromeOnDevice()) throw new Error('On-device inference requires Chrome Desktop 139+ with the Prompt API enabled.')
   const ai = getAI(getFirebaseApp(), { backend: new GoogleAIBackend() })
   const model = getGenerativeModel(ai, {
@@ -73,20 +80,26 @@ export async function runDeviceProbe(onProgress: (fraction: number) => void): Pr
       },
     },
   })
-  await model.initializeDeviceModel(onProgress)
+  onPhase('initializing')
+  await model.initializeDeviceModel(value => { if (active()) onProgress(value) })
+  if (!active()) throw new Error('Local probe expired.')
+  onPhase('generating')
   const result = await model.generateContent(PROBE_PROMPT)
+  if (!active()) throw new Error('Local probe expired.')
   if (result.response.inferenceSource !== InferenceSource.ON_DEVICE) {
     throw new Error('The SDK did not confirm an on-device inference source.')
   }
   const text = result.response.text().trim()
   if (!text) throw new Error('The on-device model returned no text.')
   return { source: 'ON_DEVICE', text: text.slice(0, 400) }
+  })
 }
 
 // This function may send a fixed *fictional* prompt to Gemini Developer API.
 // The UI requires a fresh click and explicit Spark/no-billing confirmation.
 // A missing App Check token blocks the request. No automatic fallback occurs.
 export async function runCloudProbe(): Promise<InferenceProbe> {
+  if (!CLOUD_ENABLED) throw new Error('Cloud AI is disabled for this release.')
   await ensureAppCheckToken()
   const ai = getAI(getFirebaseApp(), { backend: new GoogleAIBackend() })
   const model = getGenerativeModel(ai, {

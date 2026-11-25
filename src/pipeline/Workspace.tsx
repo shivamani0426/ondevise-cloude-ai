@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
-import { firebaseConfigured, supportsChromeOnDevice } from '../firebase'
+import { localPhaseMessage } from './local-runtime'
+import { CLOUD_ENABLED, firebaseConfigured, supportsChromeOnDevice } from '../firebase'
 import { analyzeEvidence, findSource, makeCloudPayload, makeLocalEvidencePlan, reportInvestigation, validateAIReview, validateLocalEvidenceSelection, inspectLocalEvidenceSelection, validatePrivacyCandidates } from './core'
 import type { CaseFinding, EvidenceDocument, Investigation } from './core'
 import { acceptedFileTypes, extractLocalFiles, validateFileSelection, MAX_FILES, MAX_FILE_BYTES } from './extract'
@@ -232,7 +233,7 @@ export default function InvestigationWorkspace() {
   }
 
   async function localReview() {
-    if (busy || !investigation || localAttempted) return
+    if (busy || !investigation) return
     setBusy('local')
     setLocalAttempted(true)
     setModelDownload(0)
@@ -245,7 +246,7 @@ export default function InvestigationWorkspace() {
         setLocalStatus('No readable source quotations fit the compact local prompt. Rule-based findings remain available.')
         return
       }
-      const result = await analyzeWithLocalModel(plan.prompt, setModelDownload)
+      const result = await analyzeWithLocalModel(plan.prompt, setModelDownload, phase => setLocalStatus(localPhaseMessage(phase)))
       setLocalRaw(result.text)
       const diagnostics = inspectLocalEvidenceSelection(result.text, documents, plan.choices, plan.focus)
       const grounded = validateLocalEvidenceSelection(result.text, documents, plan.choices, plan.focus)
@@ -290,7 +291,7 @@ export default function InvestigationWorkspace() {
   }
 
   async function cloudReview() {
-    if (busy || !investigation || !firebaseConfigured || !cloudPayload || cloudValidationError || !sparkConfirmed || !payloadApproved || cloudAttempted) return
+    if (!CLOUD_ENABLED || busy || !investigation || !firebaseConfigured || !cloudPayload || cloudValidationError || !sparkConfirmed || !payloadApproved || cloudAttempted) return
     const exactPayload = cloudPayload
     setCloudAttempted(true)
     setBusy('cloud')
@@ -359,6 +360,61 @@ export default function InvestigationWorkspace() {
     setSelectedFinding(finding.id)
     setSelectedRef(finding.refs[0] || '')
   }
+
+  const graphMarkup = investigation && <>
+        <div className="case-graph-tools" aria-label="Graph filters">
+          <label htmlFor="graph-view-scope">Link type
+            <select id="graph-view-scope" value={graphScope} onChange={event => setGraphScope(event.target.value as GraphScope)}>
+              <option value="all">All traced links</option><option value="rules">Rule findings</option>
+              <option value="ai">AI evidence selections</option>
+            </select>
+          </label>
+          <label htmlFor="graph-source-filter">Trace one source
+            <select id="graph-source-filter" value={graphSource} onChange={event => setGraphSource(event.target.value)}>
+              <option value="">All sources</option>
+              {documents.map(doc => <option key={doc.id} value={doc.id}>{doc.id}</option>)}
+            </select>
+          </label>
+          <label htmlFor="graph-search">Search visible labels
+            <input id="graph-search" value={graphQuery} maxLength={80} placeholder="Reference or finding" onChange={event => setGraphQuery(event.target.value)}/>
+          </label>
+        </div>
+        <p className="case-caution">Graph edges mean extracted source references, rule associations or AI-selected review cues—not authenticated real-world relationships.</p>
+        {graphView && <div className="case-graph-map" aria-label="Interactive evidence graph">
+          <svg className="case-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            {graphView.edges.map((edge, i) => {
+              const from = graphView.nodes.find(node => node.id === edge.from)
+              const to = graphView.nodes.find(node => node.id === edge.to)
+              return from && to ? <line key={i} x1={from.x} y1={from.y} x2={to.x} y2={to.y}/> : null
+            })}
+          </svg>
+          {graphView.nodes.map(node => <button key={node.id} type="button" className={'case-graph-node ' + node.kind}
+            style={{ left: node.x + '%', top: node.y + '%' }}
+            title={node.label}
+            onClick={() => {
+              if (node.findingId) {
+                const item = investigation.findings.find(finding => finding.id === node.findingId)
+                if (item) selectFinding(item)
+              } else if (node.sourceId) {
+                const doc = documents.find(document => document.id === node.sourceId)
+                if (doc) setSelectedRef(doc.id + ':' + doc.segments[0].id)
+              } else {
+                const entity = investigation.entities.find(item => item.id === node.id)
+                if (entity) setSelectedRef(entity.refs[0])
+              }
+            }}>{node.label}</button>)}
+          <div className="case-graph-caption">Sources → Entities → Findings</div>
+        </div>}
+        <p className="case-caution">Accessible alternative: all graph relationships can be followed in the findings and cited excerpts below.</p>
+        {graphView && <details className="case-explanation">
+          <summary>Trace {graphView.edges.length} grounded graph links</summary>
+          <ul className="case-trace-list">{graphView.edges.map((edge, index) => {
+            const from = graphView.nodes.find(node => node.id === edge.from)
+            const to = graphView.nodes.find(node => node.id === edge.to)
+            return <li key={edge.from + ':' + edge.to + ':' + index}>{from?.label} → {to?.label} · {edge.basis}</li>
+          })}</ul>
+        </details>}
+  </>
 
   return (
     <div className="real-workspace">
@@ -469,6 +525,16 @@ export default function InvestigationWorkspace() {
           <ul>{summary.limitations.map(limitation => <li key={limitation}>{limitation}</li>)}</ul>
         </details>
       </section>}
+      {viewMode === 'simple' && investigation && <section className="case-panel" aria-label="Evidence connections">
+        <details>
+          <summary>Explore evidence connections</summary>
+          {graphMarkup}
+          {quickExcerptOpen && excerpt && <div className="case-quick-excerpt-graph">
+            <p><strong>{excerpt.document.name}</strong> · {excerpt.segment.anchor}</p>
+            <blockquote>{excerpt.segment.text}</blockquote>
+          </div>}
+        </details>
+      </section>}
       {viewMode === 'simple' && investigation && <section className="case-panel case-quick-export" aria-labelledby="quick-export-title">
         <h2 id="quick-export-title">3. Save your review</h2>
         <p>Exports are redacted locally. Read every page before sharing—automatic masking can miss private details.</p>
@@ -487,7 +553,7 @@ export default function InvestigationWorkspace() {
             <button type="button" className="outline-action" onClick={() => setPrintPreview('')}>Close preview</button>
           </div>
         </div>}
-        <p className="case-quick-help">Need to correct extracted text, trace a graph link or record an investigator decision? Choose <strong>Show advanced tools</strong> above.</p>
+        <p className="case-quick-help">Need to correct extracted text or record an investigator decision? Choose <strong>Show advanced tools</strong> above.</p>
       </section>}
 
       {viewMode === 'advanced' && documents.length > 0 && <section className="case-panel" aria-labelledby="documents-title">
@@ -526,58 +592,7 @@ export default function InvestigationWorkspace() {
         <div className="case-panel-top"><h2 id="findings-title">3. Evidence graph and findings</h2><span className="case-tag">{investigation.entities.length} {investigation.entities.length === 1 ? 'entity' : 'entities'} · {investigation.findings.length} {investigation.findings.length === 1 ? 'finding' : 'findings'}</span></div>
         <p>Rule-based findings compare evidence across document categories, including explicit shared record references and differences in the same labelled field. Matching reference strings do NOT establish the same real-world event, authenticity or fraud. Different process stages or unsigned revisions require manual review. AI can only select literal quotations from extracted sources.</p>
 
-        <div className="case-graph-tools" aria-label="Graph filters">
-          <label htmlFor="graph-view-scope">Link type
-            <select id="graph-view-scope" value={graphScope} onChange={event => setGraphScope(event.target.value as GraphScope)}>
-              <option value="all">All traced links</option><option value="rules">Rule findings</option>
-              <option value="ai">AI evidence selections</option>
-            </select>
-          </label>
-          <label htmlFor="graph-source-filter">Trace one source
-            <select id="graph-source-filter" value={graphSource} onChange={event => setGraphSource(event.target.value)}>
-              <option value="">All sources</option>
-              {documents.map(doc => <option key={doc.id} value={doc.id}>{doc.id}</option>)}
-            </select>
-          </label>
-          <label htmlFor="graph-search">Search visible labels
-            <input id="graph-search" value={graphQuery} maxLength={80} placeholder="Reference or finding" onChange={event => setGraphQuery(event.target.value)}/>
-          </label>
-        </div>
-        <p className="case-caution">Graph edges mean extracted source references, rule associations or AI-selected review cues—not authenticated real-world relationships.</p>
-        {graphView && <div className="case-graph-map" aria-label="Interactive evidence graph">
-          <svg className="case-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {graphView.edges.map((edge, i) => {
-              const from = graphView.nodes.find(node => node.id === edge.from)
-              const to = graphView.nodes.find(node => node.id === edge.to)
-              return from && to ? <line key={i} x1={from.x} y1={from.y} x2={to.x} y2={to.y}/> : null
-            })}
-          </svg>
-          {graphView.nodes.map(node => <button key={node.id} type="button" className={'case-graph-node ' + node.kind}
-            style={{ left: node.x + '%', top: node.y + '%' }}
-            title={node.label}
-            onClick={() => {
-              if (node.findingId) {
-                const item = investigation.findings.find(finding => finding.id === node.findingId)
-                if (item) selectFinding(item)
-              } else if (node.sourceId) {
-                const doc = documents.find(document => document.id === node.sourceId)
-                if (doc) setSelectedRef(doc.id + ':' + doc.segments[0].id)
-              } else {
-                const entity = investigation.entities.find(item => item.id === node.id)
-                if (entity) setSelectedRef(entity.refs[0])
-              }
-            }}>{node.label}</button>)}
-          <div className="case-graph-caption">Sources → Entities → Findings</div>
-        </div>}
-        <p className="case-caution">Accessible alternative: all graph relationships can be followed in the findings and cited excerpts below.</p>
-        {graphView && <details className="case-explanation">
-          <summary>Trace {graphView.edges.length} grounded graph links</summary>
-          <ul className="case-trace-list">{graphView.edges.map((edge, index) => {
-            const from = graphView.nodes.find(node => node.id === edge.from)
-            const to = graphView.nodes.find(node => node.id === edge.to)
-            return <li key={edge.from + ':' + edge.to + ':' + index}>{from?.label} → {to?.label} · {edge.basis}</li>
-          })}</ul>
-        </details>}
+        {graphMarkup}
         <div className="case-findings">
           {investigation.findings.map(finding => <button key={finding.id} type="button"
             className={'case-finding ' + (selectedFinding === finding.id ? 'chosen' : '')}
@@ -641,8 +656,8 @@ export default function InvestigationWorkspace() {
         <div className="case-model-section">
           <h3>A. On-device Firebase AI Logic</h3>
           <p>Uses Chrome's local model. To reduce CPU/GPU load, it receives up to six numbered, source-grounded quotation choices (maximum 2,400 prompt characters). The model returns choice IDs, not newly written quotations. PhantomGraph independently checks each ID and the original source text. For cases with a multi-source rule finding, the choices focus on its cited evidence; model selections still do not establish relevance or truth. The full rule-based investigation examines all extracted sources. Firebase stays <code>ONLY_ON_DEVICE</code>, with no cloud fallback.</p>
-          <button className="outline-action" type="button" disabled={Boolean(busy) || !firebaseConfigured || !supportsChromeOnDevice() || localAttempted} onClick={localReview}>
-            {busy === 'local' ? 'Local model analyzing…' : localAttempted ? 'Local review attempted' : 'Review case with on-device AI'}
+          <button className="outline-action" type="button" disabled={Boolean(busy) || !firebaseConfigured || !supportsChromeOnDevice()} onClick={localReview}>
+            {busy === 'local' ? 'Local model analyzing…' : localAttempted ? 'Retry local AI review' : 'Review case with on-device AI'}
           </button>
           {modelDownload > 0 && modelDownload < 1 && <p>Local model download: {Math.round(modelDownload * 100)}%</p>}
           {localStatus && <p className="case-status" role="status">{localStatus}</p>}
@@ -654,8 +669,8 @@ export default function InvestigationWorkspace() {
         </div>
 
         <div className="case-model-section">
-          <h3>B. Optional Gemini cloud review</h3>
-          <p>Cloud analysis is <strong>off by default</strong> and free-tier access is currently restricted for this project (403). You can inspect the local redacted preview without sending it. Automatic redaction can miss names or private context; never approve a payload you have not read. If cloud access is legitimately restored, only the explicitly approved text is sent once.</p>
+          <h3>B. Cloud review (disabled; local preview only)</h3>
+          <p>Cloud analysis is <strong>disabled for this release</strong> and free-tier access is currently restricted for this project (403). You can inspect the local redacted preview without sending it. Automatic redaction can miss names or private context; never approve a payload you have not read. If cloud access is legitimately restored, only the explicitly approved text is sent once.</p>
           <button className="outline-action" disabled={Boolean(busy) || cloudAttempted} type="button" onClick={prepareCloud}>
             Prepare locally redacted cloud preview
           </button>
@@ -673,7 +688,7 @@ export default function InvestigationWorkspace() {
             <label className="case-checkbox"><input type="checkbox" checked={payloadApproved} disabled={Boolean(busy) || cloudAttempted}
               onChange={event => setPayloadApproved(event.target.checked)}/> I reviewed every character above and explicitly approve sending only this text to Gemini Developer API.</label>
             <button className="primary-action" type="button"
-              disabled={Boolean(busy) || cloudAttempted || !firebaseConfigured || !sparkConfirmed || !privacyReviewed || !payloadApproved || Boolean(cloudValidationError)}
+              disabled={!CLOUD_ENABLED || Boolean(busy) || cloudAttempted || !firebaseConfigured || !sparkConfirmed || !privacyReviewed || !payloadApproved || Boolean(cloudValidationError)}
               onClick={cloudReview}>{busy === 'cloud' ? 'Sending approved request…' : cloudAttempted ? 'Cloud request attempted (no automatic retry)' : 'Send this exact approved payload once'}</button>
           </>}
           {cloudStatus && <p className="case-status" role="status">{cloudStatus}</p>}

@@ -23,6 +23,18 @@ const badField = /(^|_)(?:id|no|number|reference|ref|code|secret|password|token|
 const trimValue = (s: string) => s.trim().replace(/^["'[{(]+|["'\s,;.)}\]]+$/g, '')
 const fieldKey = (raw: string) => raw.trim().replace(/([a-z])([A-Z])/g, '$1_$2')
   .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+// Explicit synonyms only; preserve currency, period, stage and charge scope.
+const canonicalField = (raw: string): string => {
+  const key = fieldKey(raw)
+  const aliases: Record<string, string> = {
+    date_of_issue: 'issue_date', date_of_expiry: 'expiry_date',
+    date_of_activation: 'activation_date', date_of_birth: 'birth_date',
+    claim_amount: 'claimed_amount', invoice_total: 'total_invoice_amount',
+  }
+  const match = key.match(/^(.*?)(_usd|_inr|_eur|_gbp)$/)
+  const root = match ? match[1] : key
+  return (aliases[root] || root) + (match?.[2] || '')
+}
 const familyOf = (label: string): string | null => {
   const words = fieldKey(label).split('_').filter(Boolean)
   const family = words.find(word => identityFamilies.includes(word))
@@ -47,7 +59,7 @@ function addIdentifier(items: Identifier[], docId: string, ref: string, family: 
   }
 }
 function addField(fields: Field[], docId: string, ref: string, label: string, raw: string) {
-  const key = fieldKey(label)
+  const key = canonicalField(label)
   const value = trimValue(raw)
   if (!key || key.length > 42 || badField.test(key) || key === 'source' ||
       !value || value.length > 60 || /\n/.test(value) || /^(?:null|none|unknown|n\/a|unspecified)$/i.test(value)) return
@@ -107,6 +119,14 @@ function readRecord(document: EvidenceDocument): RecordData {
     // Handle JSON object properties (including pretty-printed JSON lines),
     // colon-separated TXT/MD and "key=value" fields. Do not infer values
     // from unlabelled prose.
+    // Recognize narrowly scoped affirmative narrative facts, not arbitrary prose.
+    // A full labelled record ID on the same line is required. Negation, conditions,
+    // revisions, and competing references are left for manual review.
+    const sentence = segment.text.trim().match(/^(invoice|claim|application|policy|contract|agreement|order|transaction|shipment|case|ticket)\s+(?:ID|number|No\.?|reference)\s*[:#]?\s*([A-Za-z][A-Za-z0-9_-]{5,47})\s+(?:has|records|states)\s+(?:an?\s+)?(issue date|expiry date|activation date|claimed amount|claim amount|invoice total|total invoice amount|amount)\s+of\s+((?:USD|INR|EUR|GBP|[$₹€£])?\s*\d+(?:,\d{3})*(?:\.\d+)?(?:\s*(?:USD|INR|EUR|GBP))?|\d{4}-\d{2}-\d{2})\.?$/i)
+    if (sentence && idValue(sentence[2])) {
+      addIdentifier(identifiers, document.id, ref, sentence[1].toLowerCase(), sentence[2])
+      addField(fields, document.id, ref, sentence[3], sentence[4])
+    }
     const parts = segment.text.split(/[,;]\s*(?=["']?[A-Za-z][\w -]{0,40}["']?\s*[:=])/)
     for (const part of parts) {
       const m = part.trim().match(/^[{(]?\s*["']?([A-Za-z][\w -]{0,42})["']?\s*[:=]\s*(.*)$/)

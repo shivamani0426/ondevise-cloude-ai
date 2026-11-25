@@ -1,5 +1,7 @@
 import { getAI, getGenerativeModel, GoogleAIBackend, InferenceMode, InferenceSource, Schema } from 'firebase/ai'
-import { CLOUD_MODEL, ensureAppCheckToken, getFirebaseApp, supportsChromeOnDevice } from '../firebase'
+import { checkLocalAvailability, runLocalExclusive } from './local-runtime'
+import type { LocalProgress } from './local-runtime'
+import { CLOUD_ENABLED, CLOUD_MODEL, ensureAppCheckToken, getFirebaseApp, supportsChromeOnDevice } from '../firebase'
 
 // Firebase's on-device Prompt API can constrain generated JSON directly. A prompt
 // alone does not guarantee JSON. The ID-only contract constrains format,
@@ -15,7 +17,11 @@ export type AIResult = { source: 'ON_DEVICE' | 'IN_CLOUD'; text: string }
 
 // A local-only request. Do not replace ONLY_ON_DEVICE with a prefer mode:
 // prefer modes may silently upload the prompt when the local model is unavailable.
-export async function analyzeWithLocalModel(prompt: string, onProgress: (value: number) => void): Promise<AIResult> {
+export async function analyzeWithLocalModel(prompt: string, onProgress: (value: number) => void, onPhase: LocalProgress = () => {}): Promise<AIResult> {
+  return runLocalExclusive(async active => {
+  onPhase('checking')
+  await checkLocalAvailability()
+  if (!active()) throw new Error('Local review expired.')
   if (!supportsChromeOnDevice()) throw new Error('Chrome Desktop 139+ with on-device Prompt API is required.')
   if (prompt.length < 100 || prompt.length > 8000) throw new Error('Local analysis prompt must be between 100 and 8,000 characters.')
   const ai = getAI(getFirebaseApp(), { backend: new GoogleAIBackend() })
@@ -29,20 +35,26 @@ export async function analyzeWithLocalModel(prompt: string, onProgress: (value: 
       promptOptions: { responseConstraint: localReviewSchema },
     },
   })
-  await model.initializeDeviceModel(onProgress)
+  onPhase('initializing')
+  await model.initializeDeviceModel(value => { if (active()) onProgress(value) })
+  if (!active()) throw new Error('Local review expired.')
+  onPhase('generating')
   const result = await model.generateContent(prompt)
+  if (!active()) throw new Error('Local review expired.')
   if (result.response.inferenceSource !== InferenceSource.ON_DEVICE) {
     throw new Error('Firebase did not verify ON_DEVICE inference. No cloud fallback was allowed.')
   }
   const text = result.response.text().trim()
   if (!text) throw new Error('Local model returned an empty response.')
   return { source: 'ON_DEVICE', text }
+  })
 }
 
 // The exact text passed here is the exact prompt shown and approved by the user.
 // This function never reads File objects, automatically redacts, retries, or falls
 // back. The caller must require explicit per-attempt approval of the payload.
 export async function analyzeWithCloudModel(approvedPayload: string): Promise<AIResult> {
+  if (!CLOUD_ENABLED) throw new Error('Cloud AI is disabled for this release.')
   if (approvedPayload.length < 150 || approvedPayload.length > 16_000) {
     throw new Error('The approved payload must be 150–16,000 characters.')
   }

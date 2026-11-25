@@ -344,7 +344,7 @@ export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
     const agreement = selected ? null : compareGroup(group, true)
     const pair = selected || agreement
     const refs = pair
-      ? unique([pair.a.ref, pair.b.ref, ...ids]).slice(0, 10)
+      ? unique([...ids.slice(0, 8), pair.a.ref, pair.b.ref])
       : ids.slice(0, 10)
     if (refs.length < 2) continue
     if (selected) {

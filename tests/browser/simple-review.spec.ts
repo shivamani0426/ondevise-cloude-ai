@@ -25,6 +25,8 @@ test('simple first-run flow reviews fictional support ticket locally and preserv
   await page.locator('.case-quick-links button').first().click()
   await expect(page.locator('.case-quick-excerpt')).toBeVisible()
   await expect(page.locator('.case-quick-excerpt')).toContainText('CASE-2027-9999')
+  await page.locator('.case-quick-values button').first().click()
+  await expect(page.locator('.case-quick-excerpt')).toContainText('status: open')
   await page.getByText('Explore evidence connections', { exact: true }).click()
   await expect(page.locator('.case-graph-map')).toBeVisible()
   await page.locator('.case-graph-node').first().click()

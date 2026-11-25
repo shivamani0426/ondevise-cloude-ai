@@ -47,6 +47,8 @@ function idValue(raw: string): string | null {
   const value = trimValue(raw).toUpperCase().replace(/_/g, '-')
   if (value.length < 6 || value.length > 48 || !/^[A-Z0-9-]+$/.test(value) ||
       !/[A-Z]/.test(value) || !/\d/.test(value) || ignoredValues.test(value)) return null
+  // Explicit masking must never be treated as a complete identifier.
+  if (/^X{3,}[A-Z0-9-]{4,16}$/.test(value)) return null
   // Don't treat long free text, dates, or raw card/account numbers as IDs.
   if (/^20\d{2}-\d{2}-\d{2}$/.test(value)) return null
   return value

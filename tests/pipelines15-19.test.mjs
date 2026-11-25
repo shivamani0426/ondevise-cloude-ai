@@ -64,3 +64,15 @@ test('explicit masked identifier produces a hypothesis, never a value comparison
   const vague=doc('source-2',['The number ends in 1234.'])
   assert.equal(relateEvidence([a,vague]).length,0)
 })
+
+test('masked X-prefix identifiers never become full identity matches',()=>{
+  const a=doc('source-1',['Invoice ID: INV-2030-1234','amount: USD 300'])
+  const b=doc('source-2',['Invoice ID: XXXX1234','amount: USD 400'])
+  const c=doc('source-3',['Invoice ID: XXXX1234','amount: USD 500'])
+  assert.equal(relateEvidence([b,c]).length,0)
+  const cues=relateEvidence([a,b])
+  assert.equal(cues.length,1)
+  assert.equal(cues[0].title,'Incomplete reference needs verification')
+  assert.equal(cues[0].status,'Unverified hypothesis')
+  assert.equal(concerns([a,b,c]).length,0)
+})

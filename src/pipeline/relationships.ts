@@ -263,7 +263,7 @@ type Compared = { a: StructuredClaim; b: StructuredClaim; evaluation: Compatibil
 // A reference equality is a candidate link; only compare claims sharing
 // the same field name and compatible source identity. Prefer a genuinely
 // comparable changed fact over a routine workflow/status progression.
-function compareGroup(group: LinkedGroup): Compared | null {
+function compareGroup(group: LinkedGroup, agreementOnly = false): Compared | null {
   const claims = group.fields.map(item => claimFor(group, item))
     .filter((item): item is StructuredClaim => item !== null)
   const options: Compared[] = []
@@ -272,11 +272,13 @@ function compareGroup(group: LinkedGroup): Compared | null {
       if (claims[i].sourceId === claims[j].sourceId ||
           claims[i].property !== claims[j].property) continue
       const evaluation = compareClaimContext(claims[i], claims[j])
-      if (evaluation.outcome === 'different-values' || evaluation.outcome === 'context-dependent') {
+      if (agreementOnly ? evaluation.outcome === 'agree' && ['date','amount','number'].includes(claims[i].value.kind) :
+          evaluation.outcome === 'different-values' || evaluation.outcome === 'context-dependent') {
         options.push({ a: claims[i], b: claims[j], evaluation })
       }
     }
   }
+  if (agreementOnly) return options[0] || null
   return options.find(item => item.evaluation.outcome === 'different-values') ||
     options.find(item => item.evaluation.outcome === 'context-dependent') || null
 }
@@ -339,8 +341,10 @@ export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
     const matchingSources = unique(group.identifiers.map(item => item.docId))
     const ids = unique(group.identifiers.map(item => item.ref))
     const selected = compareGroup(group)
-    const refs = selected
-      ? unique([...ids, selected.a.ref, selected.b.ref]).slice(0, 10)
+    const agreement = selected ? null : compareGroup(group, true)
+    const pair = selected || agreement
+    const refs = pair
+      ? unique([...ids.slice(0, 8), pair.a.ref, pair.b.ref])
       : ids.slice(0, 10)
     if (refs.length < 2) continue
     if (selected) {
@@ -379,7 +383,8 @@ export function relateEvidence(documents: EvidenceDocument[]): CaseFinding[] {
         refs, origin: 'rules',
         explanation: {
           basis: 'The extracted documents contain matching, explicitly labelled record identifiers.',
-          context: 'No compatible, differing field values were established for this shared reference. Different process stages, currencies and unparseable fields are not treated as contradictions.',
+          context: agreement ? 'At least one comparable field agrees in the extracted text. Other fields may be untested or incomplete; this does not authenticate the records.' : 'No compatible, differing field values were established for this shared reference. Different process stages, currencies and unparseable fields are not treated as contradictions.',
+          ...(agreement ? { agreement: [agreement.a, agreement.b].map(claim => ({ ref: claim.ref, field: claim.property.replace(/_/g, ' '), value: claim.value.literal })) } : {}),
           limitation: 'The linked records may still concern different real-world parties or events; original documents and issuer confirmation are required.',
         },
       })

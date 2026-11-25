@@ -25,6 +25,8 @@ test('simple first-run flow reviews fictional support ticket locally and preserv
   await page.locator('.case-quick-links button').first().click()
   await expect(page.locator('.case-quick-excerpt')).toBeVisible()
   await expect(page.locator('.case-quick-excerpt')).toContainText('CASE-2027-9999')
+  await page.locator('.case-quick-values button').first().click()
+  await expect(page.locator('.case-quick-excerpt')).toContainText('status: open')
   await page.getByText('Explore evidence connections', { exact: true }).click()
   await expect(page.locator('.case-graph-map')).toBeVisible()
   await page.locator('.case-graph-node').first().click()
@@ -65,4 +67,25 @@ test('simple review is mobile-friendly and clearing case removes the result', as
   await page.getByRole('button', { name: 'Clear case from memory' }).click()
   await expect(page.locator('.case-quick-results')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Try a sample case' })).toBeVisible()
+})
+
+test('matching and uncertain outcomes are distinct and local AI is reachable in simple mode',async ({page})=>{
+  await page.goto('/')
+  await expect(page.getByRole('heading',{name:'Understand your documents'})).toBeVisible()
+  await page.locator('#evidence-upload').setInputFiles([
+    txt('a.txt','Application ID APP-2030-210 has an issue date of 2030-01-02.'),
+    txt('b.txt','Application ID: APP-2030-210\ndate_of_issue: 2030-01-02'),
+  ])
+  await page.getByRole('button',{name:'Analyze these documents'}).click()
+  await expect(page.locator('.case-outcome')).toHaveText('Matching details found')
+  await expect(page.locator('.case-quick-values')).toContainText('2030-01-02')
+  await expect(page.getByRole('button',{name:'Review case with on-device AI'})).toBeVisible()
+  await page.getByRole('button',{name:'Clear case from memory'}).click()
+  await page.locator('#evidence-upload').setInputFiles([
+    txt('a.txt','Order ID: ORD-2030-1234\namount: INR 1000'),
+    txt('b.txt','Order ID ending in 1234\namount: INR 1500'),
+  ])
+  await page.getByRole('button',{name:'Analyze these documents'}).click()
+  await expect(page.locator('.case-outcome')).toHaveText('More information needed')
+  await expect(page.locator('.case-quick-values')).toHaveCount(0)
 })

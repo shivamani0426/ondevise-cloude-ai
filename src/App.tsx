@@ -19,7 +19,7 @@ function statusClass(status: Finding['status']) {
 }
 
 export default function App() {
-  const [section, setSection] = useState<Section>('investigation')
+  const [section, setSection] = useState<Section>('workspace')
   const [selectedFinding, setSelectedFinding] = useState('fee')
   const [selectedEvidence, setSelectedEvidence] = useState('email')
   const [sourceOpen, setSourceOpen] = useState(false)
@@ -132,7 +132,7 @@ export default function App() {
       <a className="skip-link" href="#main">Skip to investigation content</a>
       <header className="topbar">
         <div className="brand"><span className="brand-symbol">◇</span> PHANTOMGRAPH <span className="brand-suffix">AI</span></div>
-        <div className="top-status"><span>CASE 01</span><span className="dot">•</span><span>Local data only</span><span className="demo-pill">{section === 'workspace' ? 'PRIVATE CASE' : 'FICTIONAL DEMO'}</span></div>
+        <div className="top-status"><span>{section === 'workspace' ? 'PRIVATE WORKSPACE' : 'SAMPLE CASE'}</span><span className="dot">•</span><span>Local data only</span><span className="demo-pill">{section === 'workspace' ? 'PRIVATE CASE' : 'FICTIONAL DEMO'}</span></div>
       </header>
 
       <div className={'layout' + (section === 'workspace' ? ' real-workspace-mode' : '')}>
@@ -140,8 +140,8 @@ export default function App() {
           <p className="sidebar-title">WORKSPACE</p>
           {sections.map((item) => <button key={item.key} className={'nav-item ' + (section === item.key ? 'active' : '')} type="button" onClick={() => setSection(item.key)} aria-current={section === item.key ? 'page' : undefined}>{item.name}</button>)}
           <div className="sidebar-foot">
-            <span className="green-dot" /> Sample data stays in this browser
-            <p>{section === 'workspace' ? 'Your case is held only in page memory. Cloud review requires explicit approval.' : 'Sample investigation is scripted; AI is optional.'}</p>
+            <span className="green-dot" /> {section === 'workspace' ? 'Documents stay in this browser' : 'Sample data stays in this browser'}
+            <p>{section === 'workspace' ? 'Your case is held in page memory. Cloud AI is disabled.' : 'Sample investigation is scripted; AI is optional.'}</p>
           </div>
         </nav>
 
@@ -247,7 +247,7 @@ export default function App() {
         </div>
       </div>}
 
-      <footer className="footer">PHANTOMGRAPH AI · SOURCE FIRST <span>{section === 'workspace' ? 'Local extraction · source-linked findings · optional consented cloud analysis' : 'Fictional sample · opt-in AI diagnostics'}</span></footer>
+      <footer className="footer">PHANTOMGRAPH AI · SOURCE FIRST <span>{section === 'workspace' ? 'Local extraction · source-linked findings · on-device AI' : 'Fictional sample · opt-in AI diagnostics'}</span></footer>
     </div>
   )
 }

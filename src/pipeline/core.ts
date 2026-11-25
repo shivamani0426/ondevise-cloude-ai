@@ -19,6 +19,7 @@ export type FindingExplanation = {
   context: string
   limitation: string
   compared?: { ref: string; field: string; value: string }[]
+  agreement?: { ref: string; field: string; value: string }[]
 }
 export type CaseFinding = {
   id: string
@@ -60,7 +61,7 @@ const patterns: { kind: EntityKind; re: RegExp }[] = [
   { kind: 'domain', re: /\b(?:https?:\/\/)?(?:www\.)?([a-z0-9][\w-]*\.)+(?:com|org|net|in|io|co|edu|gov|ai|dev|example)\b/gi },
   { kind: 'amount', re: /(?:₹|Rs\.?\s*|INR\s*|USD\s*|\$)\s?\d[\d,]*(?:\.\d{1,2})?/gi },
   { kind: 'phone', re: /(?<!\d)(?:\+91[-\s]?)?[6-9]\d{9}(?!\d)/g },
-  { kind: 'reference', re: /\b(?:invoice|reference|application|order)\s*(?:id|no\.?|number|#|:)\s*[A-Z0-9-]{4,24}\b/gi },
+  { kind: 'reference', re: /\b(?:invoice|reference|application|order)\s*(?:id|no\.?|number|#|:)\s*(?:[:#]\s*)?(?:ending in\s+[A-Z0-9-]{4,16}|[A-Z0-9-]{4,24})\b/gi },
   { kind: 'date', re: /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+20\d{2})\b/gi },
   { kind: 'organization', re: /\b(?:[A-Z][a-zA-Z]+\s+){0,3}(?:Labs|Technologies|Solutions|Services|Consulting|Enterprises|Corporation|Limited|LLP|Private Limited)\b/g },
   { kind: 'person', re: /\b(?:Mr\.?|Ms\.?|Mrs\.?|Dr\.?|Contact:)\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b/g },
@@ -565,7 +566,7 @@ export function validateApprovedCloudPayload(payload: string, documents: Evidenc
 // the application; changing a colon, amount, negation or source is impossible
 // through model-generated wording because no wording is accepted from the model.
 export type LocalEvidenceChoice = { id: string; ref: string; quote: string }
-export type LocalEvidenceFocus = { title: string; refs: string[] }
+export type LocalEvidenceFocus = { title: string; refs: string[]; compared?: {ref:string;value:string}[] }
 export type LocalEvidencePlan = { prompt: string; choices: LocalEvidenceChoice[]; focus?: LocalEvidenceFocus }
 export type LocalEvidenceDiagnostics = {
   format: 'invalid-json' | 'invalid-schema' | 'valid-json'
@@ -594,6 +595,7 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
   const focus = focusFinding ? {
     title: focusFinding.title,
     refs: unique(focusFinding.refs),
+    compared: (focusFinding.explanation?.compared || []).filter(claim => Boolean(claim.value.trim()) && Boolean(findSource(documents, claim.ref)?.segment.text.includes(claim.value))),
   } : undefined
   const cited = new Set(focus?.refs || findings.flatMap(finding => finding.refs))
   const factNumbers = focusFinding
@@ -606,6 +608,7 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
     : []
   const relevance = (value: string, ref: string): number => {
     let score = cited.has(ref) ? 5 : 0
+    if (focus?.compared?.some(claim => claim.ref === ref && value.includes(claim.value))) score += 100
     if (/\b(?:shall|must|may not|will|cannot|not|required|prohibited|effective|expires|deadline|due|subject to|pending|cancel|refund|received|delivered|shipped)\b/i.test(value)) score += 3
     if (/\b20\d{2}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/.test(value)) score += 3
     if (/(?:₹|INR|Rs\.?|USD|\$|€|£)\s?\d|\b\d+(?:\.\d+)?\s?%/.test(value)) score += 3
@@ -617,7 +620,7 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
     score += Math.min(5, focusWords.filter(word => words.has(word)).length)
     return score
   }
-  const ranked = documents.slice(0, 6).map(document => {
+  const ranked = documents.slice(0, 8).map(document => {
     const pieces: Array<{ ref: string; quote: string; score: number; order: number }> = []
     for (const [index, segment] of document.segments.slice(0, 240).entries()) {
       const ref = sourceRef(document, segment)
@@ -647,6 +650,19 @@ export function makeLocalEvidencePlan(documents: EvidenceDocument[], findings: C
     prompt += 'FOCUS rule-based review cue: ' + focus.title.slice(0, 110) +
       '. Prefer quotations directly relevant to this cue from its cited sources. ' +
       'Even matching excerpts do not establish a true contradiction.\n'
+  }
+  if (focus?.compared?.length === 2 && focus.compared[0].ref.split(':')[0] !== focus.compared[1].ref.split(':')[0]) {
+    const pair = focus.compared.map(claim => ranked.flat().find(piece => piece.ref === claim.ref && piece.quote.includes(claim.value)))
+    if (pair.every(piece => Boolean(piece))) {
+      prompt += 'For this comparison, choose BOTH passages carrying the compared values, not just record IDs. If either is unsuitable, return no IDs.\n'
+      for (const piece of pair) {
+        if (!piece) continue
+        const id = 'E' + (choices.length + 1)
+        prompt += '\nOPTION ' + id + ' [SOURCE ' + piece.ref + '] ' + JSON.stringify(piece.quote)
+        choices.push({ id, ref: piece.ref, quote: piece.quote })
+      }
+      return {prompt,choices,focus}
+    }
   }
   for (let round = 0; round < 2 && choices.length < MAX_CHOICES; round++) {
     for (const pieces of ranked) {
@@ -684,6 +700,8 @@ export function validateLocalEvidenceSelection(
   // invent a missing choice or quietly drop an unknown ID.
   if (selected.some(choice => !choice) || !selected.length) return []
   if (focus && selected.some(choice => !focus.refs.includes(choice!.ref))) return []
+  if (focus?.compared?.length === 2 && focus.compared.every(claim => choices.some(choice => choice.ref === claim.ref && choice.quote.includes(claim.value))) &&
+      !focus.compared.every(claim => selected.some(choice => choice?.ref === claim.ref && choice.quote.includes(claim.value)))) return []
   const evidence = selected.map(choice => ({ ref: choice!.ref, quote: choice!.quote }))
   const verified = validateAIReview(JSON.stringify({ findings: [{ evidence }] }), documents, 'on-device')
   if (!focus) return verified
@@ -752,7 +770,7 @@ export function reportInvestigation(investigation: Investigation, suggestions: s
   const lines = ['PHANTOMGRAPH AI — REDACTED LOCAL INVESTIGATION REPORT', 'Generated: ' + new Date().toISOString(), '',
     'LIMITATIONS: Automated extraction and heuristics can miss evidence. AI findings are unverified hypotheses, not professional advice or fraud determinations.',
     'Sensitive patterns are masked, but automatic redaction is incomplete. Read before sharing this report.',
-    'Cloud AI, if separately approved, may have received only the exact user-reviewed payload.',
+    'Cloud AI is disabled in this release. This report is generated locally.',
     '', 'DOCUMENT INDEX (filenames omitted for privacy)']
   for (const doc of investigation.documents) {
     lines.push(doc.id + ' | ' + doc.format + ' | ' + doc.segments.length + ' excerpts')
@@ -768,6 +786,7 @@ export function reportInvestigation(investigation: Investigation, suggestions: s
     lines.push('', safe(item.title) + ' [' + item.status + ']', safe(item.explanation),
       'Context: ' + safe(item.context), 'Next check: ' + safe(item.nextStep))
     for (const compared of item.compared) lines.push('  Extracted: ' + compared.ref + ' | ' + safe(compared.field) + ': ' + safe(compared.value))
+    for (const matched of item.agreement) lines.push('  Matching extracted field: ' + matched.ref + ' | ' + safe(matched.field) + ': ' + safe(matched.value))
     for (const citation of item.citations) lines.push('  Citation: ' + citation.ref + ' | ' + citation.anchor)
   }
   for (const limitation of summary.limitations) lines.push('Limitation: ' + safe(limitation))

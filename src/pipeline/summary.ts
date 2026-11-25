@@ -9,6 +9,7 @@ export type SummaryFinding = {
   context: string
   nextStep: string
   compared: { ref: string; field: string; value: string }[]
+  agreement: { ref: string; field: string; value: string }[]
   citations: { ref: string; anchor: string; documentId: string }[]
 }
 export type InvestigationSummary = {
@@ -16,7 +17,9 @@ export type InvestigationSummary = {
   entityCount: number
   ruleFindingCount: number
   aiEvidenceGroupCount: number
-  status: 'Review required' | 'No rule-based concern detected'
+  status: 'Review required' | 'No rule-based concern detected' | 'Matching details found' | 'More information needed'
+  outcome: 'difference' | 'matching' | 'uncertain' | 'none'
+  concernCount: number
   overview: string
   findings: SummaryFinding[]
   limitations: string[]
@@ -48,6 +51,9 @@ export function buildInvestigationSummary(investigation: Investigation): Investi
       Boolean(claim.value.trim()) &&
       Boolean(index.get(claim.ref)?.text.includes(claim.value))
     )
+    const agreement = (finding.explanation?.agreement || []).filter(claim =>
+      citations.some(citation => citation.ref === claim.ref) && Boolean(claim.value.trim()) &&
+      Boolean(index.get(claim.ref)?.text.includes(claim.value)))
     findings.push({
       id: finding.id,
       title: finding.title,
@@ -57,21 +63,27 @@ export function buildInvestigationSummary(investigation: Investigation): Investi
         'Review the source excerpts and record context before deciding whether the observations concern the same event.',
       nextStep: finding.nextStep,
       compared,
+      agreement,
       citations,
     })
   }
   const sourceCount = investigation.documents.length
   const ruleFindingCount = findings.length
+  const concernCount = findings.filter(item => item.status === 'Possible concern' || item.status === 'Corroborated conflict').length
+  const matching = (item: SummaryFinding) => item.title === 'Shared structured reference across documents' && item.agreement.length === 2 && new Set(item.agreement.map(claim => claim.ref.split(':')[0])).size === 2
+  const outcome = concernCount ? 'difference' : findings.some(item => !matching(item)) ? 'uncertain' : findings.length ? 'matching' : 'none'
   return {
+    outcome, concernCount,
     sourceCount,
     entityCount: investigation.entities.length,
     ruleFindingCount,
     aiEvidenceGroupCount: investigation.findings.filter(item => item.origin !== 'rules').length,
-    status: ruleFindingCount ? 'Review required' : 'No rule-based concern detected',
-    overview: sourceCount + ' locally extracted source' + (sourceCount === 1 ? ' was' : 's were') +
-      ' examined. ' + ruleFindingCount + ' source-linked rule finding' +
-      (ruleFindingCount === 1 ? ' requires' : 's require') +
-      (ruleFindingCount ? ' human reconciliation.' : ' no reconciliation based on the currently detected rules. This is not proof that the records are accurate or complete.'),
+    status: outcome === 'difference' ? 'Review required' : outcome === 'matching' ? 'Matching details found' : outcome === 'uncertain' ? 'More information needed' : 'No rule-based concern detected',
+    overview: sourceCount + ' source(s) checked. ' + (
+      outcome === 'difference' ? concernCount + ' potential difference(s) need checking. This is not a fraud determination.' :
+      outcome === 'matching' ? 'Some comparable extracted details agree. This is not proof that the records are accurate or complete.' :
+      outcome === 'uncertain' ? 'Some relationships or changes need more context before a conclusion can be drawn.' :
+      'No discrepancy matched the available checks. This is not proof that the records are accurate or complete.'),
     findings,
     limitations: [
       'An extracted quotation is not independent verification of document authenticity.',

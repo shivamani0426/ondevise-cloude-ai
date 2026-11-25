@@ -259,7 +259,7 @@ export default function InvestigationWorkspace() {
       setPrivacyReviewed(false)
       setPayloadApproved(false)
       setSparkConfirmed(false)
-      setCloudStatus('Local review finished. Prepare a new redacted cloud preview if you want an optional cloud analysis.')
+      setCloudStatus('Local review finished. Cloud AI remains disabled.')
       setInvestigation(previous => previous ? { ...previous, findings: [
         ...previous.findings.filter(finding => finding.origin !== 'on-device'), ...grounded,
       ] } : previous)
@@ -361,6 +361,13 @@ export default function InvestigationWorkspace() {
     setSelectedRef(finding.refs[0] || '')
   }
 
+  const localAction = <div className="case-local-action">
+    <div><h3>Check with local AI</h3><p>Optional. Uses your device to select relevant source lines, not decide fraud.</p></div>
+    <button className="outline-action" type="button" disabled={Boolean(busy) || !firebaseConfigured || !supportsChromeOnDevice()} onClick={localReview}>{busy === 'local' ? 'Local model analyzing…' : localAttempted ? 'Retry local AI review' : 'Review case with on-device AI'}</button>
+    {modelDownload > 0 && modelDownload < 1 && <p>Local model download: {Math.round(modelDownload * 100)}%</p>}
+    {localStatus && <p className="case-status" role="status">{localStatus}</p>}
+    {!supportsChromeOnDevice() && <p className="case-caution">Local AI needs supported desktop Chrome. Document comparisons still work.</p>}
+  </div>
   const graphMarkup = investigation && <>
         <div className="case-graph-tools" aria-label="Graph filters">
           <label htmlFor="graph-view-scope">Link type
@@ -392,6 +399,7 @@ export default function InvestigationWorkspace() {
             style={{ left: node.x + '%', top: node.y + '%' }}
             title={node.label}
             onClick={() => {
+              setQuickExcerptOpen(true)
               if (node.findingId) {
                 const item = investigation.findings.find(finding => finding.id === node.findingId)
                 if (item) selectFinding(item)
@@ -482,20 +490,20 @@ export default function InvestigationWorkspace() {
             <p className="case-quick-kicker">YOUR REVIEW</p>
             <h2 id="quick-results-title">2. Here's what we found</h2>
           </div>
-          <span className="case-tag">{summary.ruleFindingCount ? 'Needs your review' : 'No rule-matched concerns'}</span>
+          <span className={'case-tag case-outcome '+summary.outcome}>{summary.status}</span>
         </div>
         <div className="case-quick-stats">
           <span><strong>{summary.sourceCount}</strong> documents checked</span>
-          <span><strong>{summary.ruleFindingCount}</strong> item{summary.ruleFindingCount === 1 ? '' : 's'} to review</span>
+          <span><strong>{summary.concernCount}</strong> potential differences</span>
+          <span><strong>{summary.ruleFindingCount-summary.concernCount}</strong> other observations</span>
         </div>
-        <p className="case-quick-lead">{summary.ruleFindingCount
-          ? 'We found differences worth checking against the original records. This does not mean anything fraudulent happened.'
-          : 'No discrepancy matched the available checks. This does not prove your documents are complete or accurate.'}</p>
+        <p className="case-quick-lead">{summary.overview} This does not mean anything fraudulent happened.</p>
         {summary.findings.map(item => <article className="case-quick-finding" key={item.id}>
+          <span className="case-observation-label">{item.agreement.length === 2 ? 'Matching extracted details' : item.status === 'Possible concern' || item.status === 'Corroborated conflict' ? 'Potential difference' : 'Needs context'}</span>
           <h3>{item.title}</h3>
-          <p>{item.explanation}</p>
-          {item.compared.length > 0 && <div className="case-quick-values">
-            {item.compared.map((value, i) => <button key={value.ref + ':' + i} type="button"
+          <p>{item.agreement.length === 2 ? item.context : item.explanation}</p>
+          {(item.compared.length > 0 || item.agreement.length > 0) && <div className="case-quick-values">
+            {[...item.compared,...item.agreement].map((value, i) => <button key={value.ref + ':' + i} type="button"
               onClick={() => { setSelectedRef(value.ref); setQuickExcerptOpen(true) }} className="case-quick-value">
               <span>{value.field}</span><strong>{value.value}</strong>
             </button>)}
@@ -519,6 +527,7 @@ export default function InvestigationWorkspace() {
             <p className="case-caution">This is locally extracted text, not an authenticated original. Check the source document before relying on it.</p>
           </div>}
         </div>
+        {localAction}
         {quality && <p className="case-quick-quality">Evidence coverage: {quality.coveredSourceCount} of {quality.totalSourceCount} source(s) cited by findings. Extraction can miss context, formatting and signatures.</p>}
         <details className="case-quick-source">
           <summary>Important limitations</summary>
@@ -644,8 +653,8 @@ export default function InvestigationWorkspace() {
       </section>}
 
       {viewMode === 'advanced' && investigation && <section className="case-panel" aria-labelledby="ai-review-title">
-        <div className="case-panel-top"><h2 id="ai-review-title">4. Optional hybrid AI review</h2><span className="case-tag">Explicit actions only</span></div>
-        <p>On-device evidence selection remains local and source-verifiable. Gemini cloud access is currently restricted for this project; do not assume the optional cloud route works. Source authenticity and interpretation still require human review.</p>
+        <div className="case-panel-top"><h2 id="ai-review-title">4. Local AI and privacy</h2><span className="case-tag">Explicit actions only</span></div>
+        <p>Optional local AI selects source lines. Cloud AI is disabled. Check original documents before relying on any finding.</p>
 
         {privacy && <div className="case-privacy-audit">
           <h3>Pipeline 12 · Privacy readiness</h3>
@@ -665,12 +674,12 @@ export default function InvestigationWorkspace() {
             <p className="case-caution">This response stays in page memory. Do not share it if your documents contain personal information.</p>
             <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 280, overflowY: 'auto', fontSize: 12 }}>{localRaw}</pre>
           </details>}
-          {!supportsChromeOnDevice() && <p className="case-warn">Local AI requires Chrome desktop. Rule analysis and cloud review do not.</p>}
+          {!supportsChromeOnDevice() && <p className="case-warn">Local AI requires supported Chrome desktop. Document checks still work.</p>}
         </div>
 
         <div className="case-model-section">
           <h3>B. Cloud review (disabled; local preview only)</h3>
-          <p>Cloud analysis is <strong>disabled for this release</strong> and free-tier access is currently restricted for this project (403). You can inspect the local redacted preview without sending it. Automatic redaction can miss names or private context; never approve a payload you have not read. If cloud access is legitimately restored, only the explicitly approved text is sent once.</p>
+          <p>Cloud analysis is <strong>disabled for this release</strong>. This legacy preview remains available for local privacy checks only. Nothing can be sent through it.</p>
           <button className="outline-action" disabled={Boolean(busy) || cloudAttempted} type="button" onClick={prepareCloud}>
             Prepare locally redacted cloud preview
           </button>
@@ -712,8 +721,8 @@ export default function InvestigationWorkspace() {
           <h3>{item.title}</h3>
           <p><strong>{item.status}</strong> · {item.explanation}</p>
           <p><strong>Context:</strong> {item.context}</p>
-          {item.compared.length > 0 && <div className="case-summary-values">
-            {item.compared.map((claim, index) => <button key={claim.ref + ':' + index} className="inline-link" type="button" onClick={() => setSelectedRef(claim.ref)}>
+          {(item.compared.length > 0 || item.agreement.length > 0) && <div className="case-summary-values">
+            {[...item.compared,...item.agreement].map((claim, index) => <button key={claim.ref + ':' + index} className="inline-link" type="button" onClick={() => setSelectedRef(claim.ref)}>
               Extracted {claim.field}: {claim.value}
             </button>)}
           </div>}
